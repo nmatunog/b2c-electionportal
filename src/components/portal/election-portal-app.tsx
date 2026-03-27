@@ -1002,52 +1002,76 @@ export function ElectionPortalApp() {
                   <h3 className="ml-1 flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-slate-400">
                     <Gavel size={12} /> Committee Controls
                   </h3>
-                  <div className="grid grid-cols-2 gap-4">
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        const ok = await updateElectionConfig({ status: "voting" });
-                        if (ok) addLog("ADMIN", "VOTING PHASE OPENED.");
-                      }}
-                      className="rounded-2xl bg-slate-900 p-4 text-xs font-bold uppercase text-white shadow-xl transition-all active:scale-95"
-                    >
-                      Start Voting
-                    </button>
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        const ok = await updateElectionConfig({ status: "ended" });
-                        if (!ok || !activeMember) return;
-                        const declareRes = await fetch("/api/election/declare", {
-                          method: "POST",
-                          headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({
-                            actorB2cId: activeMember.b2cId,
-                            password: activeMember.password ?? "",
-                          }),
-                        });
-                        const declareJson = (await declareRes.json().catch(() => ({}))) as {
-                          ok?: boolean;
-                          message?: string;
-                          data?: { status?: string };
-                        };
-                        if (!declareRes.ok || !declareJson.ok) {
-                          addLog(
-                            "ADMIN",
-                            typeof declareJson.message === "string"
-                              ? `Polls closed; declaration pending: ${declareJson.message}`
-                              : "Polls closed; could not declare results.",
-                          );
-                          return;
-                        }
-                        await refreshElectionServerData();
-                        addLog("ADMIN", "POLLS CLOSED. RESULTS OFFICIAL.");
-                      }}
-                      className="rounded-2xl bg-red-600 p-4 text-xs font-bold uppercase text-white shadow-xl transition-all active:scale-95"
-                    >
-                      Close Polls
-                    </button>
-                  </div>
+                  {(() => {
+                    const allNominationsClosed = COMMITTEES.every((committee) =>
+                      lockedPositions.includes(committee),
+                    );
+                    return (
+                      <div className="grid grid-cols-2 gap-4">
+                        {electionStatus === "nomination" && (
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              const ok = await updateElectionConfig({
+                                status: "voting",
+                                lockedPositions: COMMITTEES,
+                              });
+                              if (ok) addLog("ADMIN", "NOMINATIONS CLOSED. VOTING PHASE OPENED.");
+                            }}
+                            disabled={!allNominationsClosed}
+                            className={`rounded-2xl p-4 text-xs font-bold uppercase shadow-xl transition-all ${
+                              allNominationsClosed
+                                ? "bg-slate-900 text-white active:scale-95"
+                                : "cursor-not-allowed bg-slate-300 text-slate-500"
+                            }`}
+                            title={
+                              allNominationsClosed
+                                ? "Close nominations and open voting."
+                                : "All committee nominations must be closed before voting can start."
+                            }
+                          >
+                            Close Nominations & Start Voting
+                          </button>
+                        )}
+                        {electionStatus === "voting" && (
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              const ok = await updateElectionConfig({ status: "ended" });
+                              if (!ok || !activeMember) return;
+                              const declareRes = await fetch("/api/election/declare", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({
+                                  actorB2cId: activeMember.b2cId,
+                                  password: activeMember.password ?? "",
+                                }),
+                              });
+                              const declareJson = (await declareRes.json().catch(() => ({}))) as {
+                                ok?: boolean;
+                                message?: string;
+                                data?: { status?: string };
+                              };
+                              if (!declareRes.ok || !declareJson.ok) {
+                                addLog(
+                                  "ADMIN",
+                                  typeof declareJson.message === "string"
+                                    ? `Polls closed; declaration pending: ${declareJson.message}`
+                                    : "Polls closed; could not declare results.",
+                                );
+                                return;
+                              }
+                              await refreshElectionServerData();
+                              addLog("ADMIN", "POLLS CLOSED. RESULTS OFFICIAL.");
+                            }}
+                            className="rounded-2xl bg-red-600 p-4 text-xs font-bold uppercase text-white shadow-xl transition-all active:scale-95"
+                          >
+                            Close Polls
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
 
