@@ -14,6 +14,8 @@
     "db:studio": "prisma studio",
     "db:import-users": "tsx scripts/import-official-users.ts",
     "db:normalize-b2c-ids": "tsx scripts/normalize-b2c-ids.ts",
+    "db:reset:preview": "node --import tsx scripts/reset-preview-election-data.ts",
+    "db:seed:preview": "node --import tsx scripts/seed-preview-election-data.ts",
     "verify:invariants": "node --import tsx scripts/verify-election-invariants.ts",
     "db:seed": "tsx prisma/seed.ts"
   },
