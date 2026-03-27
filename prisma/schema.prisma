@@ -1,0 +1,143 @@
+// B2C Election Portal — PostgreSQL (close to original models)
+
+datasource db {
+  provider = "postgresql"
+}
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+model User {
+  id           String   @id @default(cuid())
+  lastName     String
+  firstName    String
+  b2cId        String   @unique // Official B2C-YYYY-#### ID
+  password     String?  // bcrypt/argon hash from onboarding
+  role         String   @default("Member") // Member, Election Committee, Admin, ...
+
+  // Security verification
+  tinNo String   @unique
+  dob   DateTime
+
+  // Profile
+  mobile String?
+  email  String?
+
+  // Election state
+  hasVoted     Boolean   @default(false)
+  registeredAt DateTime?
+
+  nominationsMade Nomination[]    @relation("Nominator")
+  nominationsReceived Nomination[] @relation("Nominee")
+  votes           Vote[]
+  logs            GovernanceLog[]
+  motionsMoved    Motion[]        @relation("MotionMover")
+  officerAssignments UserOfficerAssignment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+/// Cooperative officer / committee seat (CDA-aligned). Admins can edit titles; assignments name who holds each seat.
+model OfficerPosition {
+  id                   String   @id @default(cuid())
+  slug                 String   @unique
+  title                String
+  description          String?
+  category             String // board | executive | committee
+  sortOrder            Int      @default(0)
+  /// When true, holders may use portal admin features (registry, committee tools, etc.).
+  grantsPortalAdmin    Boolean  @default(false)
+  /// Max simultaneous assignees; null = no cap (e.g. Election Committee).
+  maxAssignees         Int?
+
+  assignments UserOfficerAssignment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model UserOfficerAssignment {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  positionId  String
+  position    OfficerPosition @relation(fields: [positionId], references: [id], onDelete: Cascade)
+  /// True for the single Board Chairperson seat.
+  isChair     Boolean  @default(false)
+  active      Boolean  @default(true)
+  appointedAt DateTime @default(now())
+
+  @@unique([userId, positionId])
+  @@index([positionId])
+  @@index([userId])
+}
+
+model Nomination {
+  id          String   @id @default(cuid())
+  nomineeName String
+  position    String   // Election Committee | Audit Committee | Board of Director(s)
+  nomineeB2cId String?
+  nominee      User?   @relation("Nominee", fields: [nomineeB2cId], references: [b2cId])
+  status       String  @default("pending") // pending | accepted
+
+  nominatorId String
+  nominator   User     @relation("Nominator", fields: [nominatorId], references: [b2cId])
+  respondedAt DateTime?
+
+  votes     Vote[]
+  createdAt DateTime @default(now())
+
+  @@index([position])
+  @@index([nomineeB2cId])
+}
+
+model Vote {
+  id           String     @id @default(cuid())
+  voterId      String
+  voter        User       @relation(fields: [voterId], references: [b2cId])
+
+  nominationId String
+  nomination   Nomination @relation(fields: [nominationId], references: [id], onDelete: Cascade)
+
+  committee String // same idea as nomination.position; denormalized for sorting/reporting
+  createdAt DateTime @default(now())
+
+  @@unique([voterId, nominationId])
+  @@index([voterId])
+  @@index([committee])
+}
+
+model ElectionConfig {
+  id               Int      @id @default(1)
+  status           String   @default("nomination") // nomination | voting | ended
+  lockedPositions  String[] @default([])
+
+  updatedAt DateTime @updatedAt
+}
+
+model Motion {
+  id        String   @id @default(cuid())
+  position  String   @unique
+  stage     String   @default("none") // none | moved | seconded
+
+  moverId String? // B2C ID of member who moved
+  mover   User?   @relation("MotionMover", fields: [moverId], references: [b2cId])
+
+  updatedAt DateTime @updatedAt
+}
+
+model GovernanceLog {
+  id        String   @id @default(cuid())
+  timestamp DateTime @default(now())
+  user      String
+  action    String
+  details   String
+
+  userId String?
+  author User?   @relation(fields: [userId], references: [id])
+
+  @@index([timestamp])
+}
