@@ -24,13 +24,8 @@ import { NominationModule } from "./nomination-module";
 import { PremiumCard } from "./premium-card";
 import { SuperUserPanel } from "./super-user-panel";
 import type { PortalNomination, RegistryMember } from "./types";
+import { COMMITTEES, COMMITTEE_SEATS } from "@/lib/election";
 
-const COMMITTEES = ["Board of Director", "Audit Committee", "Election Committee"] as const;
-const SEATS_PER_COMMITTEE: Record<(typeof COMMITTEES)[number], number> = {
-  "Board of Director": 3,
-  "Election Committee": 2,
-  "Audit Committee": 2,
-};
 const ID_OFFSET = 5100;
 const ID_YEAR = "2026";
 
@@ -119,6 +114,25 @@ type PortalFlags = {
   }[];
 };
 
+type ElectionConfigApi = {
+  status: string;
+  lockedPositions: string[];
+};
+
+type ElectionResultsApi = Record<
+  "byCommittee",
+  Record<
+    string,
+    {
+      seats: number;
+      candidates: { nominationId: string; nomineeName: string; votes: number }[];
+      winners: { nominationId: string; nomineeName: string; votes: number }[];
+    }
+  >
+> & {
+  declaredAt: string | null;
+};
+
 export function ElectionPortalApp() {
   const router = useRouter();
   const [step, setStep] = useState("auth");
@@ -144,14 +158,34 @@ export function ElectionPortalApp() {
   const [registryError, setRegistryError] = useState<string | null>(null);
   const [portalFlags, setPortalFlags] = useState<PortalFlags | null>(null);
   const [showAdminTools, setShowAdminTools] = useState(false);
+  const [resultsDeclaredAt, setResultsDeclaredAt] = useState<string | null>(null);
+
+  const applyResultsToTallies = useCallback((results: ElectionResultsApi | null | undefined) => {
+    if (!results) return;
+    const byCommittee = results.byCommittee ?? {};
+    const tallies: Record<string, number> = {};
+    for (const committee of COMMITTEES) {
+      const rows = byCommittee[committee]?.candidates ?? [];
+      for (const row of rows) tallies[row.nominationId] = row.votes;
+    }
+    setVoteTallies(tallies);
+    setResultsDeclaredAt(results.declaredAt ?? null);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const [usersRes, nomsRes] = await Promise.all([fetch("/api/users"), fetch("/api/nominations")]);
+        const [usersRes, nomsRes, configRes, resultsRes] = await Promise.all([
+          fetch("/api/users"),
+          fetch("/api/nominations"),
+          fetch("/api/election/config"),
+          fetch("/api/election/results"),
+        ]);
         const usersJson = await usersRes.json();
         const nomsJson = await nomsRes.json();
+        const configJson = await configRes.json();
+        const resultsJson = await resultsRes.json();
 
         if (cancelled) return;
 
@@ -168,6 +202,14 @@ export function ElectionPortalApp() {
         if (nomsJson.ok && Array.isArray(nomsJson.data)) {
           setNominations((nomsJson.data as ApiNominationRow[]).map(mapApiNominationToPortal));
         }
+        if (configJson.ok && configJson.data) {
+          const cfg = configJson.data as ElectionConfigApi;
+          setElectionStatus(cfg.status);
+          setLockedPositions(Array.isArray(cfg.lockedPositions) ? cfg.lockedPositions : []);
+        }
+        if (resultsJson.ok && resultsJson.data) {
+          applyResultsToTallies(resultsJson.data as ElectionResultsApi);
+        }
       } catch {
         if (!cancelled) {
           setRegistryError("Failed to load registry. Check your connection and try again.");
@@ -180,7 +222,7 @@ export function ElectionPortalApp() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [applyResultsToTallies]);
 
   useEffect(() => {
     if (!activeMember) {
@@ -224,6 +266,27 @@ export function ElectionPortalApp() {
       // Non-blocking refresh; UI already has error surfaces for initial load.
     }
   }, []);
+
+  const refreshElectionServerData = useCallback(async () => {
+    try {
+      const [configRes, resultsRes] = await Promise.all([
+        fetch("/api/election/config"),
+        fetch("/api/election/results"),
+      ]);
+      const configJson = await configRes.json();
+      const resultsJson = await resultsRes.json();
+      if (configJson.ok && configJson.data) {
+        const cfg = configJson.data as ElectionConfigApi;
+        setElectionStatus(cfg.status);
+        setLockedPositions(Array.isArray(cfg.lockedPositions) ? cfg.lockedPositions : []);
+      }
+      if (resultsJson.ok && resultsJson.data) {
+        applyResultsToTallies(resultsJson.data as ElectionResultsApi);
+      }
+    } catch {
+      // Non-blocking refresh path.
+    }
+  }, [applyResultsToTallies]);
 
   const addLog = useCallback((action: string, details: string) => {
     const entry: GovernanceLogEntry = {
@@ -467,19 +530,54 @@ export function ElectionPortalApp() {
     );
   };
 
-  const handleVoteSubmit = () => {
-    const isComplete = COMMITTEES.every((c) => ballot[c].length === SEATS_PER_COMMITTEE[c]);
+  const handleVoteSubmit = async () => {
+    if (!activeMember) return;
+    const isComplete = COMMITTEES.every((c) => ballot[c].length === COMMITTEE_SEATS[c]);
     if (!isComplete) return;
 
-    const newTallies = { ...voteTallies };
-    Object.values(ballot)
-      .flat()
-      .forEach((id) => {
-        newTallies[id] = (newTallies[id] || 0) + 1;
-      });
-    setVoteTallies(newTallies);
-    addLog("VOTING", "Individual ballot cast with committee-specific seat limits.");
+    const res = await fetch("/api/votes", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        voterB2cId: activeMember.b2cId,
+        password: activeMember.password ?? "",
+        ballot,
+      }),
+    });
+    const json = (await res.json().catch(() => ({}))) as { ok?: boolean; message?: string };
+    if (!res.ok || !json.ok) {
+      addLog("VOTING", typeof json.message === "string" ? json.message : "Failed to cast ballot.");
+      return;
+    }
+    addLog("VOTING", "Ballot recorded by server.");
+    setBallot({
+      "Board of Director": [],
+      "Audit Committee": [],
+      "Election Committee": [],
+    });
+    await refreshElectionServerData();
     setStep("success");
+  };
+
+  const updateElectionConfig = async (patch: { status?: string; lockedPositions?: string[] }) => {
+    if (!activeMember) return false;
+    const res = await fetch("/api/election/config", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        actorB2cId: activeMember.b2cId,
+        password: activeMember.password ?? "",
+        ...patch,
+      }),
+    });
+    const json = (await res.json().catch(() => ({}))) as { ok?: boolean; message?: string; data?: ElectionConfigApi };
+    if (!res.ok || !json.ok || !json.data) {
+      addLog("ADMIN", typeof json.message === "string" ? json.message : "Failed to update election config.");
+      return false;
+    }
+    setElectionStatus(json.data.status);
+    setLockedPositions(Array.isArray(json.data.lockedPositions) ? json.data.lockedPositions : []);
+    return true;
   };
 
   return (
@@ -844,9 +942,9 @@ export function ElectionPortalApp() {
                   <div className="grid grid-cols-2 gap-4">
                     <button
                       type="button"
-                      onClick={() => {
-                        setElectionStatus("voting");
-                        addLog("ADMIN", "VOTING PHASE OPENED.");
+                      onClick={async () => {
+                        const ok = await updateElectionConfig({ status: "voting" });
+                        if (ok) addLog("ADMIN", "VOTING PHASE OPENED.");
                       }}
                       className="rounded-2xl bg-slate-900 p-4 text-xs font-bold uppercase text-white shadow-xl transition-all active:scale-95"
                     >
@@ -854,8 +952,32 @@ export function ElectionPortalApp() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => {
-                        setElectionStatus("ended");
+                      onClick={async () => {
+                        const ok = await updateElectionConfig({ status: "ended" });
+                        if (!ok || !activeMember) return;
+                        const declareRes = await fetch("/api/election/declare", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({
+                            actorB2cId: activeMember.b2cId,
+                            password: activeMember.password ?? "",
+                          }),
+                        });
+                        const declareJson = (await declareRes.json().catch(() => ({}))) as {
+                          ok?: boolean;
+                          message?: string;
+                          data?: { status?: string };
+                        };
+                        if (!declareRes.ok || !declareJson.ok) {
+                          addLog(
+                            "ADMIN",
+                            typeof declareJson.message === "string"
+                              ? `Polls closed; declaration pending: ${declareJson.message}`
+                              : "Polls closed; could not declare results.",
+                          );
+                          return;
+                        }
+                        await refreshElectionServerData();
                         addLog("ADMIN", "POLLS CLOSED. RESULTS OFFICIAL.");
                       }}
                       className="rounded-2xl bg-red-600 p-4 text-xs font-bold uppercase text-white shadow-xl transition-all active:scale-95"
@@ -903,10 +1025,21 @@ export function ElectionPortalApp() {
                       <Trophy size={12} /> {electionStatus === "ended" ? "Official Winners" : "Live Tally"}
                     </h3>
                   </div>
+                  {electionStatus === "ended" && resultsDeclaredAt && (
+                    <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-[11px] font-semibold text-emerald-800">
+                      Results declared at{" "}
+                      <span className="font-black">
+                        {new Date(resultsDeclaredAt).toLocaleString(undefined, {
+                          dateStyle: "medium",
+                          timeStyle: "short",
+                        })}
+                      </span>
+                    </div>
+                  )}
                   {COMMITTEES.map((com) => {
                     const candidates = nominations.filter((n) => n.position === com && n.status === "accepted");
                     const sorted = [...candidates].sort((a, b) => (voteTallies[b.id] || 0) - (voteTallies[a.id] || 0));
-                    const winnerCount = SEATS_PER_COMMITTEE[com];
+                    const winnerCount = COMMITTEE_SEATS[com];
                     return (
                       <PremiumCard key={com} className="space-y-3">
                         <p className="border-b pb-2 text-[10px] font-black uppercase tracking-widest text-slate-400">{com}</p>
@@ -1034,9 +1167,10 @@ export function ElectionPortalApp() {
             electionStatus={electionStatus}
             motions={motions}
             onNominate={handleNominate}
-            onLock={(pos) => {
-              setLockedPositions((prev) => [...prev, pos]);
-              addLog("CLOSURE", `Nominations for ${pos} closed via motion.`);
+            onLock={async (pos) => {
+              const next = Array.from(new Set([...lockedPositions, pos]));
+              const ok = await updateElectionConfig({ lockedPositions: next });
+              if (ok) addLog("CLOSURE", `Nominations for ${pos} closed via motion.`);
             }}
             onMotionUpdate={(pos, stage, mover) => {
               setMotions((prev) => ({ ...prev, [pos]: { stage, moverId: mover } }));
@@ -1061,7 +1195,7 @@ export function ElectionPortalApp() {
             </div>
             {COMMITTEES.map((committee) => {
               const candidates = nominations.filter((n) => n.position === committee && n.status === "accepted");
-              const requiredSelections = SEATS_PER_COMMITTEE[committee];
+              const requiredSelections = COMMITTEE_SEATS[committee];
               return (
                 <div key={committee} className="space-y-4">
                   <div className="flex items-end justify-between px-1">
@@ -1134,14 +1268,14 @@ export function ElectionPortalApp() {
               <button
                 type="button"
                 onClick={handleVoteSubmit}
-                disabled={!COMMITTEES.every((c) => ballot[c].length === SEATS_PER_COMMITTEE[c])}
+                disabled={!COMMITTEES.every((c) => ballot[c].length === COMMITTEE_SEATS[c])}
                 className={`w-full rounded-[2.5rem] py-5 text-lg font-black shadow-2xl transition-all ${
-                  COMMITTEES.every((c) => ballot[c].length === SEATS_PER_COMMITTEE[c])
+                  COMMITTEES.every((c) => ballot[c].length === COMMITTEE_SEATS[c])
                     ? "bg-blue-950 text-white opacity-100 active:scale-95"
                     : "cursor-not-allowed bg-slate-300 text-slate-500 opacity-50"
                 }`}
               >
-                Confirm Selections ({Object.values(SEATS_PER_COMMITTEE).reduce((sum, seats) => sum + seats, 0)} Votes)
+                Confirm Selections ({Object.values(COMMITTEE_SEATS).reduce((sum, seats) => sum + seats, 0)} Votes)
               </button>
             </div>
           </div>

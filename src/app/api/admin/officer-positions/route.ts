@@ -1,12 +1,20 @@
 import { NextResponse } from "next/server";
 
+import { verifyAndUpgradePassword } from "@/lib/auth-password";
 import { userHasPortalAdminGrant } from "@/lib/authz";
 import { prisma } from "@/lib/prisma";
+import { getClientIp, takeRateLimit } from "@/lib/rate-limit";
 
 /**
  * Update officer position title/description (portal admins and super user).
  */
 export async function PATCH(request: Request) {
+  const ip = getClientIp(request);
+  const rl = takeRateLimit(`officer_positions:${ip}`, 20, 60_000);
+  if (!rl.allowed) {
+    return NextResponse.json({ ok: false, message: "Too many requests. Please try again shortly." }, { status: 429 });
+  }
+
   let body: {
     b2cId?: string;
     password?: string;
@@ -33,7 +41,7 @@ export async function PATCH(request: Request) {
     select: { id: true, password: true },
   });
   if (!actor) return NextResponse.json({ ok: false, message: "Not found." }, { status: 404 });
-  if (actor.password && password !== actor.password) {
+  if (!(await verifyAndUpgradePassword(actor, password))) {
     return NextResponse.json({ ok: false, message: "Invalid password." }, { status: 401 });
   }
   if (!(await userHasPortalAdminGrant(actor.id))) {

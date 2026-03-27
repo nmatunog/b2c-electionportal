@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 
+import { verifyAndUpgradePassword } from "@/lib/auth-password";
 import { prisma } from "@/lib/prisma";
+import { getClientIp, takeRateLimit } from "@/lib/rate-limit";
 
 type CreateNominationInput = {
   nomineeName: string;
@@ -163,6 +165,12 @@ export async function POST(request: Request) {
 }
 
 export async function PATCH(request: Request) {
+  const ip = getClientIp(request);
+  const rl = takeRateLimit(`nomination_accept:${ip}`, 20, 60_000);
+  if (!rl.allowed) {
+    return NextResponse.json({ ok: false, message: "Too many requests. Please try again shortly." }, { status: 429 });
+  }
+
   let body: unknown;
   try {
     body = await request.json();
@@ -181,7 +189,7 @@ export async function PATCH(request: Request) {
       id: true,
       nomineeB2cId: true,
       status: true,
-      nominee: { select: { password: true } },
+      nominee: { select: { id: true, password: true } },
     },
   });
   if (!nomination) {
@@ -190,7 +198,10 @@ export async function PATCH(request: Request) {
   if (!nomination.nomineeB2cId || nomination.nomineeB2cId !== validated.data.nomineeB2cId) {
     return NextResponse.json({ ok: false, message: "Only the nominated member can accept this nomination." }, { status: 403 });
   }
-  if (nomination.nominee?.password && nomination.nominee.password !== validated.data.password) {
+  if (
+    !nomination.nominee ||
+    !(await verifyAndUpgradePassword({ id: nomination.nominee.id, password: nomination.nominee.password }, validated.data.password ?? ""))
+  ) {
     return NextResponse.json({ ok: false, message: "Invalid password." }, { status: 401 });
   }
 

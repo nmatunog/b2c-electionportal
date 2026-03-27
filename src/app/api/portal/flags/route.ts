@@ -7,12 +7,20 @@ import {
   userHasElectionCommitteeAccess,
   userHasPortalAdminGrant,
 } from "@/lib/authz";
+import { verifyAndUpgradePassword } from "@/lib/auth-password";
 import { prisma } from "@/lib/prisma";
+import { getClientIp, takeRateLimit } from "@/lib/rate-limit";
 
 /**
  * Returns safe UI flags for the signed-in member (identified by b2cId + optional password check).
  */
 export async function POST(request: Request) {
+  const ip = getClientIp(request);
+  const rl = takeRateLimit(`portal_flags:${ip}`, 40, 60_000);
+  if (!rl.allowed) {
+    return NextResponse.json({ ok: false, message: "Too many requests. Please try again shortly." }, { status: 429 });
+  }
+
   let body: { b2cId?: string; password?: string };
   try {
     body = await request.json();
@@ -42,7 +50,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, message: "Not found." }, { status: 404 });
   }
 
-  if (user.password && password !== user.password) {
+  if (!(await verifyAndUpgradePassword({ id: user.id, password: user.password }, password))) {
     return NextResponse.json({ ok: false, message: "Invalid password." }, { status: 401 });
   }
 

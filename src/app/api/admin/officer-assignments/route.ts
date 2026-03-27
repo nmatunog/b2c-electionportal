@@ -1,12 +1,20 @@
 import { NextResponse } from "next/server";
 
+import { verifyAndUpgradePassword } from "@/lib/auth-password";
 import { canManagePortalAdmins } from "@/lib/authz";
 import { prisma } from "@/lib/prisma";
+import { getClientIp, takeRateLimit } from "@/lib/rate-limit";
 
 /**
  * Assign or unassign a member to an officer position. Super user only (portal admin grants).
  */
 export async function POST(request: Request) {
+  const ip = getClientIp(request);
+  const rl = takeRateLimit(`officer_assignments:${ip}`, 20, 60_000);
+  if (!rl.allowed) {
+    return NextResponse.json({ ok: false, message: "Too many requests. Please try again shortly." }, { status: 429 });
+  }
+
   let body: {
     actorB2cId?: string;
     password?: string;
@@ -36,7 +44,7 @@ export async function POST(request: Request) {
     select: { id: true, password: true },
   });
   if (!actor) return NextResponse.json({ ok: false, message: "Actor not found." }, { status: 404 });
-  if (actor.password && password !== actor.password) {
+  if (!(await verifyAndUpgradePassword(actor, password))) {
     return NextResponse.json({ ok: false, message: "Invalid password." }, { status: 401 });
   }
   if (!(await canManagePortalAdmins(actor.id))) {

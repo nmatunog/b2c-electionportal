@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 
+import { hashPasswordIfProvided } from "@/lib/password";
 import { prisma } from "@/lib/prisma";
+import { getClientIp, takeRateLimit } from "@/lib/rate-limit";
 
 type SelfRegisterInput = {
   lastName: string;
@@ -85,6 +87,12 @@ function validateBody(body: unknown): { ok: true; data: SelfRegisterInput } | { 
  * Minimum identity: DOB + TIN + contact detail (mobile/email).
  */
 export async function POST(request: Request) {
+  const ip = getClientIp(request);
+  const rl = takeRateLimit(`self_register:${ip}`, 10, 60_000);
+  if (!rl.allowed) {
+    return NextResponse.json({ ok: false, message: "Too many requests. Please try again shortly." }, { status: 429 });
+  }
+
   let body: unknown;
   try {
     body = await request.json();
@@ -111,6 +119,7 @@ export async function POST(request: Request) {
   const normalizedFirst = normalizeUpper(validated.data.firstName);
 
   try {
+    const hashedPassword = await hashPasswordIfProvided(validated.data.password);
     let user = await prisma.user.findUnique({
       where: { tinNo: normalizedTin },
       select: { id: true, b2cId: true },
@@ -135,7 +144,7 @@ export async function POST(request: Request) {
       dob: dobDate,
       mobile: validated.data.mobile,
       email: validated.data.email,
-      password: validated.data.password,
+      password: hashedPassword,
       role: "Member",
       registeredAt: new Date(),
     };

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { hashPasswordIfProvided } from "@/lib/password";
 import { prisma } from "@/lib/prisma";
 import { isSuperUser } from "@/lib/super-user";
 
@@ -119,6 +120,7 @@ export async function POST(request: Request) {
   }
 
   try {
+    const hashedPassword = await hashPasswordIfProvided(validated.data.password);
     const user = await prisma.user.create({
       data: {
         lastName: validated.data.lastName,
@@ -129,7 +131,7 @@ export async function POST(request: Request) {
         role: validated.data.role ?? "Member",
         mobile: validated.data.mobile,
         email: validated.data.email,
-        password: validated.data.password,
+        password: hashedPassword,
         registeredAt: registeredAtDate,
       },
       select: {

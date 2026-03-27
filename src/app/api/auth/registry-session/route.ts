@@ -2,7 +2,9 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
 import { userHasPortalAdminGrant } from "@/lib/authz";
+import { verifyAndUpgradePassword } from "@/lib/auth-password";
 import { prisma } from "@/lib/prisma";
+import { getClientIp, takeRateLimit } from "@/lib/rate-limit";
 
 const COOKIE_NAME = "b2c_registry_session";
 
@@ -11,6 +13,12 @@ const COOKIE_NAME = "b2c_registry_session";
  * Nomination search uses /api/users separately and does not require this cookie.
  */
 export async function POST(request: Request) {
+  const ip = getClientIp(request);
+  const rl = takeRateLimit(`registry_session:${ip}`, 20, 60_000);
+  if (!rl.allowed) {
+    return NextResponse.json({ ok: false, message: "Too many requests. Please try again shortly." }, { status: 429 });
+  }
+
   let body: { b2cId?: string; password?: string };
   try {
     body = await request.json();
@@ -34,10 +42,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, message: "Forbidden." }, { status: 403 });
   }
 
-  if (user.password) {
-    if (password !== user.password) {
-      return NextResponse.json({ ok: false, message: "Invalid password." }, { status: 401 });
-    }
+  if (!(await verifyAndUpgradePassword(user, password))) {
+    return NextResponse.json({ ok: false, message: "Invalid password." }, { status: 401 });
   }
 
   const store = await cookies();
