@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 
+import { verifyAndUpgradePassword } from "@/lib/auth-password";
 import { hashPasswordIfProvided } from "@/lib/password";
 import { prisma } from "@/lib/prisma";
+import { getClientIp, takeRateLimit } from "@/lib/rate-limit";
 import { isSuperUser } from "@/lib/super-user";
 
 type CreateUserInput = {
@@ -34,6 +36,14 @@ function parseDate(value: string): Date | null {
   return date;
 }
 
+type UpdateProfileInput = {
+  b2cId: string;
+  password: string;
+  dob: string;
+  mobile?: string;
+  email?: string;
+};
+
 function validateCreateUserInput(body: unknown): { ok: true; data: CreateUserInput } | { ok: false; message: string } {
   if (!body || typeof body !== "object") {
     return { ok: false, message: "Request body must be a JSON object." };
@@ -60,6 +70,34 @@ function validateCreateUserInput(body: unknown): { ok: true; data: CreateUserInp
       email: parseOptionalString(input.email),
       password: parseOptionalString(input.password),
       registeredAt: parseOptionalString(input.registeredAt),
+    },
+  };
+}
+
+function validateUpdateProfileInput(body: unknown): { ok: true; data: UpdateProfileInput } | { ok: false; message: string } {
+  if (!body || typeof body !== "object") {
+    return { ok: false, message: "Request body must be a JSON object." };
+  }
+
+  const input = body as Record<string, unknown>;
+  if (!isNonEmptyString(input.b2cId)) {
+    return { ok: false, message: "Field 'b2cId' is required." };
+  }
+  if (!isNonEmptyString(input.password)) {
+    return { ok: false, message: "Field 'password' is required for secure profile updates." };
+  }
+  if (!isNonEmptyString(input.dob)) {
+    return { ok: false, message: "Field 'dob' is required." };
+  }
+
+  return {
+    ok: true,
+    data: {
+      b2cId: String(input.b2cId).trim(),
+      password: String(input.password),
+      dob: String(input.dob).trim(),
+      mobile: parseOptionalString(input.mobile),
+      email: parseOptionalString(input.email),
     },
   };
 }
@@ -162,4 +200,66 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ ok: false, message: "Failed to create user." }, { status: 500 });
   }
+}
+
+export async function PATCH(request: Request) {
+  const ip = getClientIp(request);
+  const rl = takeRateLimit(`users_patch:${ip}`, 20, 60_000);
+  if (!rl.allowed) {
+    return NextResponse.json({ ok: false, message: "Too many requests. Please try again shortly." }, { status: 429 });
+  }
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ ok: false, message: "Invalid JSON body." }, { status: 400 });
+  }
+
+  const validated = validateUpdateProfileInput(body);
+  if (!validated.ok) {
+    return NextResponse.json({ ok: false, message: validated.message }, { status: 400 });
+  }
+
+  const dobDate = parseDate(validated.data.dob);
+  if (!dobDate) {
+    return NextResponse.json({ ok: false, message: "Field 'dob' must be a valid date string." }, { status: 400 });
+  }
+
+  const user = await prisma.user.findUnique({
+    where: { b2cId: validated.data.b2cId },
+    select: { id: true, password: true },
+  });
+  if (!user) {
+    return NextResponse.json({ ok: false, message: "User not found." }, { status: 404 });
+  }
+  if (!(await verifyAndUpgradePassword(user, validated.data.password))) {
+    return NextResponse.json({ ok: false, message: "Invalid password." }, { status: 401 });
+  }
+
+  const updated = await prisma.user.update({
+    where: { id: user.id },
+    data: {
+      dob: dobDate,
+      mobile: validated.data.mobile,
+      email: validated.data.email,
+    },
+    select: {
+      id: true,
+      lastName: true,
+      firstName: true,
+      b2cId: true,
+      role: true,
+      tinNo: true,
+      dob: true,
+      mobile: true,
+      email: true,
+      hasVoted: true,
+      registeredAt: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
+
+  return NextResponse.json({ ok: true, data: updated });
 }

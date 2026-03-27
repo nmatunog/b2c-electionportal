@@ -41,6 +41,8 @@ type ApiUser = {
   role: string;
   tinNo: string;
   dob: string;
+  mobile?: string | null;
+  email?: string | null;
   registeredAt: string | null;
 };
 
@@ -159,6 +161,11 @@ export function ElectionPortalApp() {
   const [portalFlags, setPortalFlags] = useState<PortalFlags | null>(null);
   const [showAdminTools, setShowAdminTools] = useState(false);
   const [resultsDeclaredAt, setResultsDeclaredAt] = useState<string | null>(null);
+  const [profileDob, setProfileDob] = useState("");
+  const [profileMobile, setProfileMobile] = useState("");
+  const [profileEmail, setProfileEmail] = useState("");
+  const [profileError, setProfileError] = useState("");
+  const [profileSaving, setProfileSaving] = useState(false);
 
   const applyResultsToTallies = useCallback((results: ElectionResultsApi | null | undefined) => {
     if (!results) return;
@@ -248,6 +255,14 @@ export function ElectionPortalApp() {
       cancelled = true;
     };
   }, [activeMember]);
+
+  useEffect(() => {
+    if (step !== "profile" || !activeMember) return;
+    setProfileDob(activeMember.dob ?? "");
+    setProfileMobile(activeMember.mobile ?? "");
+    setProfileEmail(activeMember.email ?? "");
+    setProfileError("");
+  }, [step, activeMember]);
 
   const reloadRegistry = useCallback(async () => {
     try {
@@ -578,6 +593,54 @@ export function ElectionPortalApp() {
     setElectionStatus(json.data.status);
     setLockedPositions(Array.isArray(json.data.lockedPositions) ? json.data.lockedPositions : []);
     return true;
+  };
+
+  const handleProfileSave = async () => {
+    if (!activeMember) return;
+    setProfileError("");
+    if (!profileDob.trim()) {
+      setProfileError("Date of birth is required.");
+      return;
+    }
+    setProfileSaving(true);
+    try {
+      const res = await fetch("/api/users", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          b2cId: activeMember.b2cId,
+          password: activeMember.password ?? "",
+          dob: profileDob,
+          mobile: profileMobile,
+          email: profileEmail,
+        }),
+      });
+      const json = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        message?: string;
+        data?: ApiUser;
+      };
+      if (!res.ok || !json.ok || !json.data) {
+        setProfileError(typeof json.message === "string" ? json.message : "Could not update profile.");
+        return;
+      }
+
+      const mapped = mapApiUserToRegistry(json.data);
+      const updatedMember: ActiveMember = {
+        ...activeMember,
+        ...mapped,
+        mobile: json.data.mobile ?? profileMobile,
+        email: json.data.email ?? profileEmail,
+      };
+      const fullName = `${updatedMember.firstName.toUpperCase()} ${updatedMember.lastName.toUpperCase()}`;
+      setLocalRegistry((prev) => ({ ...prev, [fullName]: updatedMember }));
+      setActiveMember(updatedMember);
+      addLog("PROFILE", "Member profile updated securely.");
+      setStep("dashboard");
+      void reloadRegistry();
+    } finally {
+      setProfileSaving(false);
+    }
   };
 
   return (
@@ -1123,13 +1186,36 @@ export function ElectionPortalApp() {
                   <label className="ml-1 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-slate-400">
                     <Phone size={10} /> Mobile Number
                   </label>
-                  <input type="tel" placeholder="0917-XXX-XXXX" className="w-full rounded-2xl border-2 border-slate-100 bg-slate-50 p-4 font-bold uppercase outline-none focus:border-blue-600" />
+                  <input
+                    type="tel"
+                    placeholder="0917-XXX-XXXX"
+                    value={profileMobile}
+                    onChange={(e) => setProfileMobile(e.target.value)}
+                    className="w-full rounded-2xl border-2 border-slate-100 bg-slate-50 p-4 font-bold uppercase outline-none focus:border-blue-600"
+                  />
                 </div>
                 <div className="space-y-1">
                   <label className="ml-1 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-slate-400">
                     <Mail size={10} /> Email Address
                   </label>
-                  <input type="email" placeholder="name@coop.com" className="w-full rounded-2xl border-2 border-slate-100 bg-slate-50 p-4 font-bold uppercase outline-none focus:border-blue-600" />
+                  <input
+                    type="email"
+                    placeholder="name@coop.com"
+                    value={profileEmail}
+                    onChange={(e) => setProfileEmail(e.target.value)}
+                    className="w-full rounded-2xl border-2 border-slate-100 bg-slate-50 p-4 font-bold uppercase outline-none focus:border-blue-600"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="ml-1 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-slate-400">
+                    <Calendar size={10} /> Date of Birth
+                  </label>
+                  <input
+                    type="date"
+                    value={profileDob}
+                    onChange={(e) => setProfileDob(e.target.value)}
+                    className="w-full rounded-2xl border-2 border-slate-100 bg-slate-50 p-4 font-bold uppercase outline-none focus:border-blue-600"
+                  />
                 </div>
               </div>
               <div className="rounded-2xl border border-blue-100 bg-blue-50 p-5">
@@ -1141,19 +1227,18 @@ export function ElectionPortalApp() {
                   </div>
                   <div>
                     <p className="text-[8px] font-bold uppercase text-slate-400">DOB</p>
-                    <p className="text-xs font-black text-slate-700">{activeMember.dob}</p>
+                    <p className="text-xs font-black text-slate-700">{profileDob || activeMember.dob}</p>
                   </div>
                 </div>
               </div>
+              {profileError && <p className="text-center text-xs font-bold text-red-500">{profileError}</p>}
               <button
                 type="button"
-                onClick={() => {
-                  addLog("PROFILE", "Member contact details updated.");
-                  setStep("dashboard");
-                }}
+                onClick={() => void handleProfileSave()}
+                disabled={profileSaving}
                 className="w-full rounded-3xl bg-blue-700 py-5 text-lg font-black text-white shadow-xl transition-all active:scale-95"
               >
-                Save Changes
+                {profileSaving ? "Saving..." : "Save Changes"}
               </button>
             </PremiumCard>
           </div>
