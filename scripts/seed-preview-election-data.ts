@@ -33,7 +33,7 @@ function parseHost(url: string): string {
 }
 
 const PREVIEW_USERS: SeedUser[] = [
-  { b2cId: "B2C-2026-PVW001", firstName: "Nilo", lastName: "Matunog", tinNo: "100000001", dob: "1980-01-12", role: "Member", email: "nilo.preview@example.com" },
+  { b2cId: "B2C-2026-PVW001", firstName: "Nilo", lastName: "Matunog", tinNo: "100000001", dob: "1980-01-12", role: "Election Committee", email: "nilo.preview@example.com" },
   { b2cId: "B2C-2026-PVW002", firstName: "Shelsea", lastName: "Mermida", tinNo: "100000002", dob: "1985-02-14", role: "Member", mobile: "09170000002" },
   { b2cId: "B2C-2026-PVW003", firstName: "Hermelyn", lastName: "Simene", tinNo: "100000003", dob: "1986-03-18", role: "Member", email: "hermelyn.preview@example.com" },
   { b2cId: "B2C-2026-PVW004", firstName: "Dennis", lastName: "Balantucas", tinNo: "100000004", dob: "1982-04-22", role: "Member", mobile: "09170000004" },

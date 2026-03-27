@@ -14,7 +14,7 @@ export type UserForAuthz = {
 export async function userHasPortalAdminGrant(userId: string): Promise<boolean> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { firstName: true, lastName: true, role: true },
+    select: { firstName: true, lastName: true, b2cId: true, role: true },
   });
   if (!user) return false;
   if (isSuperUser(user)) return true;
@@ -37,7 +37,7 @@ export async function userHasPortalAdminGrant(userId: string): Promise<boolean> 
 export async function userHasElectionCommitteeAccess(userId: string): Promise<boolean> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { firstName: true, lastName: true, role: true },
+    select: { firstName: true, lastName: true, b2cId: true, role: true },
   });
   if (!user) return false;
   if (isSuperUser(user)) return true;
@@ -58,7 +58,7 @@ export async function userHasElectionCommitteeAccess(userId: string): Promise<bo
 export async function canManagePortalAdmins(actorUserId: string): Promise<boolean> {
   const u = await prisma.user.findUnique({
     where: { id: actorUserId },
-    select: { firstName: true, lastName: true },
+    select: { firstName: true, lastName: true, b2cId: true },
   });
   return u ? isSuperUser(u) : false;
 }
@@ -69,6 +69,7 @@ export async function canManagePortalAdmins(actorUserId: string): Promise<boolea
 export function getDisplayRoleLabel(user: {
   firstName: string;
   lastName: string;
+  b2cId?: string;
   role: string;
 }): string {
   if (isSuperUser(user)) return "Member";
@@ -79,7 +80,7 @@ export function getDisplayRoleLabel(user: {
 export async function getPrimaryOfficerTitleForUi(userId: string): Promise<string | null> {
   const u = await prisma.user.findUnique({
     where: { id: userId },
-    select: { firstName: true, lastName: true },
+    select: { firstName: true, lastName: true, b2cId: true },
   });
   if (u && isSuperUser(u)) return null;
 

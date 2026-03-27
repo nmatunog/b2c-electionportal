@@ -39,6 +39,7 @@ export async function POST(request: Request) {
     where: { b2cId },
     select: {
       id: true,
+      b2cId: true,
       firstName: true,
       lastName: true,
       role: true,
