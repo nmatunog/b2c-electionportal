@@ -138,3 +138,23 @@ Use this checklist before every production merge:
 - [ ] Production environment variables verified.
 - [ ] Rollback target identified.
 - [ ] Owner available for post-deploy verification.
+
+## 10) Preview Schema Commands (Copy/Paste)
+
+Set these once in your shell session:
+
+```bash
+export PREVIEW_DATABASE_URL='postgresql://<user>:<password>@<host>:6543/postgres?pgbouncer=true&schema=preview'
+export PREVIEW_DIRECT_URL='postgresql://<user>:<password>@<host>:5432/postgres?sslmode=require&schema=preview'
+```
+
+Then run preview-safe setup:
+
+```bash
+npm run db:deploy:preview
+npm run db:reset:preview
+npm run db:seed:preview
+npm run verify:invariants:preview
+```
+
+Expected signal on deploy: Prisma output should mention `schema "preview"` (not `public`).
