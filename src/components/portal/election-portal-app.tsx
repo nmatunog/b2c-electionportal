@@ -1036,12 +1036,12 @@ export function ElectionPortalApp() {
                     <Gavel size={12} /> Committee Controls
                   </h3>
                   {(() => {
-                    const allNominationsClosed = COMMITTEES.every((committee) =>
-                      lockedPositions.includes(committee),
+                    const allNominationsReadyToClose = COMMITTEES.every(
+                      (committee) => lockedPositions.includes(committee) || motions[committee]?.stage === "seconded",
                     );
                     return (
                       <div className="grid grid-cols-2 gap-4">
-                        {electionStatus === "nomination" && (
+                        {electionStatus === "nomination" && portalFlags?.canManageAdmins && (
                           <button
                             type="button"
                             onClick={async () => {
@@ -1051,16 +1051,16 @@ export function ElectionPortalApp() {
                               });
                               if (ok) addLog("ADMIN", "NOMINATIONS CLOSED. VOTING PHASE OPENED.");
                             }}
-                            disabled={!allNominationsClosed}
+                            disabled={!allNominationsReadyToClose}
                             className={`rounded-2xl p-4 text-xs font-bold uppercase shadow-xl transition-all ${
-                              allNominationsClosed
+                              allNominationsReadyToClose
                                 ? "bg-slate-900 text-white active:scale-95"
                                 : "cursor-not-allowed bg-slate-300 text-slate-500"
                             }`}
                             title={
-                              allNominationsClosed
+                              allNominationsReadyToClose
                                 ? "Close nominations and open voting."
-                                : "All committee nominations must be closed before voting can start."
+                                : "Each committee needs a seconded motion before voting can start."
                             }
                           >
                             Close Nominations & Start Voting
@@ -1309,11 +1309,6 @@ export function ElectionPortalApp() {
             electionStatus={electionStatus}
             motions={motions}
             onNominate={handleNominate}
-            onLock={async (pos) => {
-              const next = Array.from(new Set([...lockedPositions, pos]));
-              const ok = await updateElectionConfig({ lockedPositions: next });
-              if (ok) addLog("CLOSURE", `Nominations for ${pos} closed via motion.`);
-            }}
             onMotionUpdate={(pos, stage, mover) => {
               setMotions((prev) => ({ ...prev, [pos]: { stage, moverId: mover } }));
               addLog("MOTION", `${stage.toUpperCase()} motion for ${pos}.`);

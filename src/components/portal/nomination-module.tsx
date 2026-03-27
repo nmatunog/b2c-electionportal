@@ -26,7 +26,6 @@ type NominationModuleProps = {
   motions: Record<string, MotionState>;
   onMotionUpdate: (pos: string, stage: string, mover: string) => void;
   onObjection: (pos: string) => void;
-  onLock: (pos: string) => void;
   onFinish: () => void;
   initialTarget?: string | null;
   masterRegistry: RegistryMember[];
@@ -41,7 +40,6 @@ export function NominationModule({
   motions,
   onMotionUpdate,
   onObjection,
-  onLock,
   onFinish,
   initialTarget = null,
   masterRegistry,
@@ -163,7 +161,7 @@ export function NominationModule({
               </button>
             </>
           ) : (
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3">
               <button
                 type="button"
                 onClick={() => onObjection(targetPos)}
@@ -171,13 +169,9 @@ export function NominationModule({
               >
                 I Object
               </button>
-              <button
-                type="button"
-                onClick={() => onLock(targetPos)}
-                className="rounded-2xl bg-emerald-500 py-4 text-xs font-bold uppercase text-white shadow-lg shadow-emerald-900/20"
-              >
-                Close Nominations
-              </button>
+              <p className="rounded-2xl border border-emerald-300/40 bg-emerald-500/10 px-4 py-3 text-center text-[11px] font-semibold text-emerald-100">
+                Motion seconded. Awaiting super user to close nominations and start voting.
+              </p>
             </div>
           )}
         </PremiumCard>
