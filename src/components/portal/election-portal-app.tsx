@@ -73,6 +73,8 @@ type ActiveMember = RegistryMember & {
   email?: string;
 };
 
+const PORTAL_SESSION_KEY = "b2c_portal_active_member";
+
 type ApiNominationRow = {
   id: string;
   nomineeName: string;
@@ -166,6 +168,37 @@ export function ElectionPortalApp() {
   const [profileEmail, setProfileEmail] = useState("");
   const [profileError, setProfileError] = useState("");
   const [profileSaving, setProfileSaving] = useState(false);
+
+  useEffect(() => {
+    try {
+      const raw = window.sessionStorage.getItem(PORTAL_SESSION_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Partial<ActiveMember>;
+      if (
+        typeof parsed.b2cId === "string" &&
+        typeof parsed.firstName === "string" &&
+        typeof parsed.lastName === "string"
+      ) {
+        setActiveMember(parsed as ActiveMember);
+        setStep("dashboard");
+        setIsReturning(true);
+      }
+    } catch {
+      // Ignore malformed/empty session payload.
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      if (!activeMember) {
+        window.sessionStorage.removeItem(PORTAL_SESSION_KEY);
+        return;
+      }
+      window.sessionStorage.setItem(PORTAL_SESSION_KEY, JSON.stringify(activeMember));
+    } catch {
+      // Ignore storage errors (private mode, quota).
+    }
+  }, [activeMember]);
 
   const applyResultsToTallies = useCallback((results: ElectionResultsApi | null | undefined) => {
     if (!results) return;

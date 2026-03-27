@@ -176,7 +176,7 @@ export function NominationModule({
                 onClick={() => onLock(targetPos)}
                 className="rounded-2xl bg-emerald-500 py-4 text-xs font-bold uppercase text-white shadow-lg shadow-emerald-900/20"
               >
-                Close Polls
+                Close Nominations
               </button>
             </div>
           )}
