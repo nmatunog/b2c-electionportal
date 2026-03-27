@@ -170,7 +170,7 @@ export function NominationModule({
                 I Object
               </button>
               <p className="rounded-2xl border border-emerald-300/40 bg-emerald-500/10 px-4 py-3 text-center text-[11px] font-semibold text-emerald-100">
-                Motion seconded. Awaiting super user to close nominations and start voting.
+                Motion Seconded. Awaiting Election Committee to close nominations and declare to start voting.
               </p>
             </div>
           )}
