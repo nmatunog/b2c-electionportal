@@ -1,6 +1,8 @@
 /**
  * Group nomination rows so the same person for the same position appears once.
- * Identity: nominee B2C ID when set; otherwise normalized display name.
+ * Identity: **committee position + normalized display name** (same for BOD, Audit, Election Committee).
+ * Rows with the same normalized name merge even if one row has nomineeB2cId and another does not,
+ * so duplicate nominations and split vote tallies combine.
  */
 
 export type NominationLike = {
@@ -10,8 +12,18 @@ export type NominationLike = {
   createdAt: string;
 };
 
-function normalizeDisplayName(name: string): string {
-  return name.trim().replace(/\s+/g, " ").toLowerCase();
+/** Collapses spacing, commas, and case so "DOE, Jane" and "jane  doe" match. */
+export function normalizeDisplayName(name: string): string {
+  return name
+    .normalize("NFKC")
+    .trim()
+    .replace(/[,\s]+/g, " ")
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+}
+
+function normalizePosition(position: string): string {
+  return position.trim().replace(/\s+/g, " ");
 }
 
 export function nominationCandidateKey(row: {
@@ -19,10 +31,9 @@ export function nominationCandidateKey(row: {
   nomineeName: string;
   nomineeB2cId: string | null;
 }): string {
-  const pos = row.position.trim();
-  const b2c = row.nomineeB2cId?.trim();
-  if (b2c) return `${pos}\0${b2c.toUpperCase()}`;
-  return `${pos}\0name:${normalizeDisplayName(row.nomineeName)}`;
+  const pos = normalizePosition(row.position);
+  const nameKey = normalizeDisplayName(row.nomineeName);
+  return `${pos}\0name:${nameKey}`;
 }
 
 export function groupNominationsByCandidate<T extends NominationLike>(rows: T[]): { key: string; rows: T[] }[] {
