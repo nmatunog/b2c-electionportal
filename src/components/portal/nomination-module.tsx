@@ -10,10 +10,10 @@ import {
   X,
 } from "lucide-react";
 
+import { COMMITTEES } from "@/lib/election";
+
 import { PremiumCard } from "./premium-card";
 import type { PortalNomination, RegistryMember } from "./types";
-
-const COMMITTEES = ["Board of Director", "Audit Committee", "Election Committee"];
 
 type MotionState = { stage: string; moverId: string | null };
 

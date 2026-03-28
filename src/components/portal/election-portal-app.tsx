@@ -1044,7 +1044,7 @@ export function ElectionPortalApp() {
                 })()
               )}
 
-              {portalFlags?.canUseElectionCommitteeControls && (
+              {(portalFlags?.canUseElectionCommitteeControls || portalFlags?.canManageAdmins) && (
                 <div className="mb-8 space-y-4">
                   <h3 className="ml-1 flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-slate-400">
                     <Gavel size={12} /> Committee Controls
@@ -1053,9 +1053,12 @@ export function ElectionPortalApp() {
                     const allNominationsReadyToClose = COMMITTEES.every(
                       (committee) => lockedPositions.includes(committee) || motions[committee]?.stage === "seconded",
                     );
+                    const canStartVoting =
+                      allNominationsReadyToClose || Boolean(portalFlags?.canManageAdmins);
                     return (
                       <div className="grid grid-cols-2 gap-4">
-                        {electionStatus === "nomination" && portalFlags?.canManageAdmins && (
+                        {electionStatus === "nomination" &&
+                          (portalFlags?.canUseElectionCommitteeControls || portalFlags?.canManageAdmins) && (
                           <button
                             type="button"
                             onClick={async () => {
@@ -1065,15 +1068,17 @@ export function ElectionPortalApp() {
                               });
                               if (ok) addLog("ADMIN", "NOMINATIONS CLOSED. VOTING PHASE OPENED.");
                             }}
-                            disabled={!allNominationsReadyToClose}
+                            disabled={!canStartVoting}
                             className={`rounded-2xl p-4 text-xs font-bold uppercase shadow-xl transition-all ${
-                              allNominationsReadyToClose
+                              canStartVoting
                                 ? "bg-slate-900 text-white active:scale-95"
                                 : "cursor-not-allowed bg-slate-300 text-slate-500"
                             }`}
                             title={
-                              allNominationsReadyToClose
-                                ? "Close nominations and open voting."
+                              canStartVoting
+                                ? allNominationsReadyToClose
+                                  ? "Close nominations and open voting."
+                                  : "Super user: start voting without all committees seconded."
                                 : "Each committee needs a seconded motion before voting can start."
                             }
                           >
