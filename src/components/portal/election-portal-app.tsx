@@ -1094,7 +1094,7 @@ export function ElectionPortalApp() {
                   <span className="mb-4 inline-block rounded-full bg-white/20 px-3 py-1 text-[10px] font-bold uppercase tracking-wider">
                     Official Election Cycle
                   </span>
-                  <h2 className="mb-1 text-2xl font-black">2024 General Assembly</h2>
+                  <h2 className="mb-1 text-2xl font-black">2026 General Assembly</h2>
                   <p className="mb-6 text-xs font-medium leading-relaxed text-blue-100">
                     Phase: <span className="font-black uppercase text-white underline">{electionStatus}</span>
                   </p>
@@ -1308,6 +1308,7 @@ export function ElectionPortalApp() {
                     password={activeMember.password ?? ""}
                     electionEnded={electionStatus === "ended"}
                     onNominationsChanged={reloadRegistry}
+                    votingProgress={portalFlags?.votingProgress ?? null}
                   />
                 </div>
               )}
