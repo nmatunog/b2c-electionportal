@@ -158,3 +158,9 @@ npm run verify:invariants:preview
 ```
 
 Expected signal on deploy: Prisma output should mention `schema "preview"` (not `public`).
+
+## 11) Nominations management (production)
+
+- **Who can use it:** Portal administrators (super user / admin grants) and **Election Committee** users see **Manage nominations** on the member dashboard after login.
+- **What it does:** Create, edit, or delete nomination rows via `/api/admin/nominations` (requires member password). Use this to correct mistakes or add nominations on behalf of members.
+- **Election freeze:** When the election status is **ended**, the API rejects create/update/delete until the cycle is reset in the database (same idea as frozen election configuration).

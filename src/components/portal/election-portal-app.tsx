@@ -21,6 +21,7 @@ import {
 } from "lucide-react";
 
 import { NominationModule } from "./nomination-module";
+import { NominationsAdminPanel } from "./nominations-admin-panel";
 import { PremiumCard } from "./premium-card";
 import { SuperUserPanel } from "./super-user-panel";
 import type { PortalNomination, RegistryMember } from "./types";
@@ -168,6 +169,13 @@ export function ElectionPortalApp() {
   const [profileEmail, setProfileEmail] = useState("");
   const [profileError, setProfileError] = useState("");
   const [profileSaving, setProfileSaving] = useState(false);
+  const [nominationNotice, setNominationNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!nominationNotice) return;
+    const t = window.setTimeout(() => setNominationNotice(null), 6000);
+    return () => window.clearTimeout(t);
+  }, [nominationNotice]);
 
   useEffect(() => {
     try {
@@ -980,6 +988,12 @@ export function ElectionPortalApp() {
                 </button>
               </div>
 
+              {nominationNotice && (
+                <div className="mb-6 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-center text-xs font-bold text-emerald-900">
+                  {nominationNotice}
+                </div>
+              )}
+
               <PremiumCard dark className="relative mb-8 overflow-hidden bg-blue-700">
                 <div className="relative z-10">
                   <span className="mb-4 inline-block rounded-full bg-white/20 px-3 py-1 text-[10px] font-bold uppercase tracking-wider">
@@ -1105,6 +1119,17 @@ export function ElectionPortalApp() {
                       </div>
                     );
                   })()}
+                </div>
+              )}
+
+              {(portalFlags?.canManageAdmins || portalFlags?.canUseElectionCommitteeControls) && (
+                <div className="mb-8">
+                  <NominationsAdminPanel
+                    actorB2cId={activeMember.b2cId}
+                    password={activeMember.password ?? ""}
+                    electionEnded={electionStatus === "ended"}
+                    onNominationsChanged={reloadRegistry}
+                  />
                 </div>
               )}
 
@@ -1319,6 +1344,7 @@ export function ElectionPortalApp() {
             }}
             onFinish={() => setStep("dashboard")}
             masterRegistry={masterRegistry}
+            onNominationRecorded={(msg) => setNominationNotice(msg)}
           />
         )}
 

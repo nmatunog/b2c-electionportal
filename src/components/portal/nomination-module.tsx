@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   AlertCircle,
   ArrowLeft,
@@ -29,6 +29,8 @@ type NominationModuleProps = {
   onFinish: () => void;
   initialTarget?: string | null;
   masterRegistry: RegistryMember[];
+  /** Called when a nomination is saved and user returns to dashboard (so parent can show a notice). */
+  onNominationRecorded?: (message: string) => void;
 };
 
 export function NominationModule({
@@ -43,11 +45,19 @@ export function NominationModule({
   onFinish,
   initialTarget = null,
   masterRegistry,
+  onNominationRecorded,
 }: NominationModuleProps) {
   const [view, setView] = useState<"committees" | "detail">(initialTarget ? "detail" : "committees");
   const [targetPos, setTargetPos] = useState<string | null>(initialTarget);
   const [selectedTinNo, setSelectedTinNo] = useState("");
   const [selectedMember, setSelectedMember] = useState<RegistryMember | null>(null);
+  const [nominationSuccess, setNominationSuccess] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!nominationSuccess) return;
+    const t = window.setTimeout(() => setNominationSuccess(null), 6000);
+    return () => window.clearTimeout(t);
+  }, [nominationSuccess]);
 
   const currentNominees = nominations.filter((n) => n.position === targetPos);
   const currentMotion = targetPos ? motions[targetPos] || { stage: "none", moverId: null } : { stage: "none", moverId: null };
@@ -58,6 +68,11 @@ export function NominationModule({
   if (view === "committees" || !targetPos) {
     return (
       <div className="slide-up space-y-6">
+        {nominationSuccess && (
+          <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-center text-xs font-bold text-emerald-900">
+            {nominationSuccess}
+          </div>
+        )}
         <div className="flex items-center justify-between px-1">
           <h2 className="text-3xl font-extrabold text-slate-900">Nominations</h2>
           <button
@@ -110,6 +125,11 @@ export function NominationModule({
 
   return (
     <div className="slide-up space-y-6">
+      {nominationSuccess && (
+        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-center text-xs font-bold text-emerald-900">
+          {nominationSuccess}
+        </div>
+      )}
       <button
         type="button"
         onClick={() => setView("committees")}
@@ -238,6 +258,9 @@ export function NominationModule({
                 onClick={async () => {
                   const ok = await onNominate(selectedMember, targetPos);
                   if (!ok) return;
+                  setNominationSuccess(
+                    `Nomination recorded for ${selectedMember.firstName} ${selectedMember.lastName} — ${targetPos}.`,
+                  );
                   setSelectedTinNo("");
                   setSelectedMember(null);
                   setView("committees");
@@ -251,6 +274,9 @@ export function NominationModule({
                 onClick={async () => {
                   const ok = await onNominate(selectedMember, targetPos);
                   if (!ok) return;
+                  const msg = `Nomination recorded for ${selectedMember.firstName} ${selectedMember.lastName} — ${targetPos}.`;
+                  setNominationSuccess(msg);
+                  onNominationRecorded?.(msg);
                   setSelectedTinNo("");
                   onFinish();
                 }}

@@ -55,6 +55,15 @@ export async function userHasElectionCommitteeAccess(userId: string): Promise<bo
   return (election?.assignments.length ?? 0) > 0;
 }
 
+/** Portal admins or election committee may manage nominations (CRUD). */
+export async function userCanManageNominations(userId: string): Promise<boolean> {
+  const [admin, election] = await Promise.all([
+    userHasPortalAdminGrant(userId),
+    userHasElectionCommitteeAccess(userId),
+  ]);
+  return admin || election;
+}
+
 export async function canManagePortalAdmins(actorUserId: string): Promise<boolean> {
   const u = await prisma.user.findUnique({
     where: { id: actorUserId },
