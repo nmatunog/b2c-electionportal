@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
@@ -45,6 +45,7 @@ type ApiUser = {
   mobile?: string | null;
   email?: string | null;
   registeredAt: string | null;
+  hasVoted?: boolean;
 };
 
 function mapApiUserToRegistry(u: ApiUser): RegistryMember {
@@ -72,9 +73,17 @@ type ActiveMember = RegistryMember & {
   password?: string;
   mobile?: string;
   email?: string;
+  /** Synced from server after ballot is cast. */
+  hasVoted?: boolean;
 };
 
 const PORTAL_SESSION_KEY = "b2c_portal_active_member";
+const VOTE_CONFIRM_STORAGE_KEY = "b2c_portal_vote_confirmation";
+
+type VoteConfirmation = {
+  recordedAt: string;
+  votesRecorded: number;
+};
 
 type ApiNominationRow = {
   id: string;
@@ -117,6 +126,12 @@ type PortalFlags = {
     grantsPortalAdmin: boolean;
     maxAssignees: number | null;
   }[];
+  /** Present for election committee and portal super-admins; turnout across all registered members. */
+  votingProgress?: {
+    totalMembers: number;
+    ballotsCast: number;
+    allMembersHaveVoted: boolean;
+  };
 };
 
 type ElectionConfigApi = {
@@ -170,6 +185,12 @@ export function ElectionPortalApp() {
   const [profileError, setProfileError] = useState("");
   const [profileSaving, setProfileSaving] = useState(false);
   const [nominationNotice, setNominationNotice] = useState<string | null>(null);
+  const [voteConfirmation, setVoteConfirmation] = useState<VoteConfirmation | null>(null);
+  const activeMemberRef = useRef<ActiveMember | null>(null);
+
+  useEffect(() => {
+    activeMemberRef.current = activeMember;
+  }, [activeMember]);
 
   useEffect(() => {
     if (!nominationNotice) return;
@@ -200,6 +221,8 @@ export function ElectionPortalApp() {
     try {
       if (!activeMember) {
         window.sessionStorage.removeItem(PORTAL_SESSION_KEY);
+        window.sessionStorage.removeItem(VOTE_CONFIRM_STORAGE_KEY);
+        setVoteConfirmation(null);
         return;
       }
       window.sessionStorage.setItem(PORTAL_SESSION_KEY, JSON.stringify(activeMember));
@@ -207,6 +230,28 @@ export function ElectionPortalApp() {
       // Ignore storage errors (private mode, quota).
     }
   }, [activeMember]);
+
+  useEffect(() => {
+    if (!activeMember?.b2cId) return;
+    try {
+      const raw = window.sessionStorage.getItem(VOTE_CONFIRM_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as {
+        voterB2cId?: string;
+        recordedAt?: string;
+        votesRecorded?: unknown;
+      };
+      if (
+        parsed.voterB2cId === activeMember.b2cId &&
+        typeof parsed.recordedAt === "string" &&
+        typeof parsed.votesRecorded === "number"
+      ) {
+        setVoteConfirmation({ recordedAt: parsed.recordedAt, votesRecorded: parsed.votesRecorded });
+      }
+    } catch {
+      // Ignore malformed storage.
+    }
+  }, [activeMember?.b2cId]);
 
   const applyResultsToTallies = useCallback((results: ElectionResultsApi | null | undefined) => {
     if (!results) return;
@@ -238,9 +283,16 @@ export function ElectionPortalApp() {
         if (cancelled) return;
 
         if (usersJson.ok && Array.isArray(usersJson.data)) {
-          const mapped: RegistryMember[] = (usersJson.data as ApiUser[]).map(mapApiUserToRegistry);
+          const rows = usersJson.data as ApiUser[];
+          const mapped: RegistryMember[] = rows.map(mapApiUserToRegistry);
           mapped.sort((a, b) => a.lastName.localeCompare(b.lastName));
           setMasterRegistry(mapped);
+          setActiveMember((prev) => {
+            if (!prev?.b2cId) return prev;
+            const row = rows.find((u) => u.b2cId === prev.b2cId);
+            if (!row || typeof row.hasVoted !== "boolean") return prev;
+            return { ...prev, hasVoted: row.hasVoted };
+          });
           setRegistryError(null);
         } else {
           setRegistryError("Could not load member registry.");
@@ -272,30 +324,32 @@ export function ElectionPortalApp() {
     };
   }, [applyResultsToTallies]);
 
+  const fetchPortalFlags = useCallback(async () => {
+    const m = activeMemberRef.current;
+    if (!m?.b2cId) return;
+    try {
+      const res = await fetch("/api/portal/flags", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          b2cId: m.b2cId,
+          password: m.password ?? "",
+        }),
+      });
+      const json = await res.json();
+      if (json.ok && json.data) setPortalFlags(json.data as PortalFlags);
+    } catch {
+      // Ignore network errors.
+    }
+  }, []);
+
   useEffect(() => {
     if (!activeMember) {
       setPortalFlags(null);
       return;
     }
-    let cancelled = false;
-    (async () => {
-      const res = await fetch("/api/portal/flags", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          b2cId: activeMember.b2cId,
-          password: activeMember.password ?? "",
-        }),
-      });
-      const json = await res.json();
-      if (!cancelled && json.ok && json.data) {
-        setPortalFlags(json.data as PortalFlags);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [activeMember]);
+    void fetchPortalFlags();
+  }, [activeMember, fetchPortalFlags]);
 
   useEffect(() => {
     if (step !== "profile" || !activeMember) return;
@@ -311,9 +365,16 @@ export function ElectionPortalApp() {
       const usersJson = await usersRes.json();
       const nomsJson = await nomsRes.json();
       if (usersJson.ok && Array.isArray(usersJson.data)) {
-        const mapped: RegistryMember[] = (usersJson.data as ApiUser[]).map(mapApiUserToRegistry);
+        const rows = usersJson.data as ApiUser[];
+        const mapped: RegistryMember[] = rows.map(mapApiUserToRegistry);
         mapped.sort((a, b) => a.lastName.localeCompare(b.lastName));
         setMasterRegistry(mapped);
+        setActiveMember((prev) => {
+          if (!prev?.b2cId) return prev;
+          const row = rows.find((u) => u.b2cId === prev.b2cId);
+          if (!row || typeof row.hasVoted !== "boolean") return prev;
+          return { ...prev, hasVoted: row.hasVoted };
+        });
       }
       if (nomsJson.ok && Array.isArray(nomsJson.data)) {
         setNominations((nomsJson.data as ApiNominationRow[]).map(mapApiNominationToPortal));
@@ -321,7 +382,13 @@ export function ElectionPortalApp() {
     } catch {
       // Non-blocking refresh; UI already has error surfaces for initial load.
     }
-  }, []);
+    await fetchPortalFlags();
+  }, [fetchPortalFlags]);
+
+  useEffect(() => {
+    if (!activeMember?.b2cId) return;
+    void reloadRegistry();
+  }, [activeMember?.b2cId, reloadRegistry]);
 
   const refreshElectionServerData = useCallback(async () => {
     try {
@@ -342,7 +409,8 @@ export function ElectionPortalApp() {
     } catch {
       // Non-blocking refresh path.
     }
-  }, [applyResultsToTallies]);
+    await fetchPortalFlags();
+  }, [applyResultsToTallies, fetchPortalFlags]);
 
   const addLog = useCallback((action: string, details: string) => {
     const entry: GovernanceLogEntry = {
@@ -600,10 +668,29 @@ export function ElectionPortalApp() {
         ballot,
       }),
     });
-    const json = (await res.json().catch(() => ({}))) as { ok?: boolean; message?: string };
+    const json = (await res.json().catch(() => ({}))) as {
+      ok?: boolean;
+      message?: string;
+      data?: { status?: string; recordedAt?: string; votesRecorded?: number };
+    };
     if (!res.ok || !json.ok) {
       addLog("VOTING", typeof json.message === "string" ? json.message : "Failed to cast ballot.");
       return;
+    }
+    const totalSeats = Object.values(COMMITTEE_SEATS).reduce((a, b) => a + b, 0);
+    const confirmed: VoteConfirmation = {
+      recordedAt:
+        typeof json.data?.recordedAt === "string" ? json.data.recordedAt : new Date().toISOString(),
+      votesRecorded: typeof json.data?.votesRecorded === "number" ? json.data.votesRecorded : totalSeats,
+    };
+    setVoteConfirmation(confirmed);
+    try {
+      window.sessionStorage.setItem(
+        VOTE_CONFIRM_STORAGE_KEY,
+        JSON.stringify({ ...confirmed, voterB2cId: activeMember.b2cId }),
+      );
+    } catch {
+      // Ignore storage errors.
     }
     addLog("VOTING", "Ballot recorded by server.");
     setBallot({
@@ -611,9 +698,16 @@ export function ElectionPortalApp() {
       "Audit Committee": [],
       "Election Committee": [],
     });
+    setActiveMember((prev) => (prev ? { ...prev, hasVoted: true } : null));
     await refreshElectionServerData();
+    await reloadRegistry();
     setStep("success");
   };
+
+  useEffect(() => {
+    if (step !== "vote" || !activeMember?.hasVoted) return;
+    setStep("success");
+  }, [step, activeMember?.hasVoted, activeMember]);
 
   const updateElectionConfig = async (patch: { status?: string; lockedPositions?: string[] }) => {
     if (!activeMember) return false;
@@ -672,6 +766,7 @@ export function ElectionPortalApp() {
         ...mapped,
         mobile: json.data.mobile ?? profileMobile,
         email: json.data.email ?? profileEmail,
+        ...(typeof json.data.hasVoted === "boolean" ? { hasVoted: json.data.hasVoted } : {}),
       };
       const fullName = `${updatedMember.firstName.toUpperCase()} ${updatedMember.lastName.toUpperCase()}`;
       setLocalRegistry((prev) => ({ ...prev, [fullName]: updatedMember }));
@@ -1005,10 +1100,20 @@ export function ElectionPortalApp() {
                   </p>
                   <button
                     type="button"
-                    onClick={() => setStep(electionStatus === "voting" ? "vote" : "nominate")}
+                    onClick={() => {
+                      if (electionStatus === "voting" && activeMember.hasVoted) {
+                        setStep("success");
+                        return;
+                      }
+                      setStep(electionStatus === "voting" ? "vote" : "nominate");
+                    }}
                     className="rounded-2xl bg-white px-6 py-3 text-sm font-black text-blue-700 shadow-lg transition-all active:scale-95"
                   >
-                    {electionStatus === "voting" ? "Cast Ballot" : "Manage Nominations"}
+                    {electionStatus === "voting"
+                      ? activeMember.hasVoted
+                        ? "View ballot confirmation"
+                        : "Cast Ballot"
+                      : "Manage Nominations"}
                   </button>
                 </div>
                 <Gavel className="absolute -bottom-10 -right-10 h-48 w-48 rotate-12 text-white/10" />
@@ -1043,6 +1148,66 @@ export function ElectionPortalApp() {
                   );
                 })()
               )}
+
+              {electionStatus === "voting" &&
+                (portalFlags?.canUseElectionCommitteeControls || portalFlags?.canManageAdmins) &&
+                portalFlags?.votingProgress && (
+                  <div
+                    className={`mb-8 rounded-2xl border-2 px-4 py-4 shadow-sm ${
+                      portalFlags.votingProgress.allMembersHaveVoted
+                        ? "border-amber-400 bg-amber-50"
+                        : "border-slate-200 bg-slate-50/90"
+                    }`}
+                  >
+                    <div className="flex flex-wrap items-start gap-3">
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-amber-100 text-amber-700">
+                        <Bell size={20} />
+                      </div>
+                      <div className="min-w-0 flex-1 space-y-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="text-xs font-black uppercase tracking-widest text-amber-900">
+                            {portalFlags.votingProgress.allMembersHaveVoted
+                              ? "Full turnout — ready to close polls"
+                              : "Voting turnout (committee)"}
+                          </p>
+                          {portalFlags.canManageAdmins && (
+                            <span className="rounded-full bg-amber-900 px-2 py-0.5 text-[9px] font-black uppercase tracking-wider text-white">
+                              Admin
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-sm font-semibold text-slate-800">
+                          Ballots cast:{" "}
+                          <span className="font-black tabular-nums">
+                            {portalFlags.votingProgress.ballotsCast} / {portalFlags.votingProgress.totalMembers}
+                          </span>{" "}
+                          registered members
+                        </p>
+                        {portalFlags.votingProgress.allMembersHaveVoted ? (
+                          <p className="text-xs leading-relaxed text-slate-700">
+                            Every registered member has voted. Check the live tallies below, then use{" "}
+                            <strong>Close Polls</strong> to end voting and run <strong>Declare results</strong> (same
+                            action).
+                          </p>
+                        ) : (
+                          <p className="text-xs leading-relaxed text-slate-600">
+                            Counts update as ballots are cast. You may close polls when your rules allow — full turnout
+                            is not required.
+                          </p>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() =>
+                            document.getElementById("election-live-tally")?.scrollIntoView({ behavior: "smooth" })
+                          }
+                          className="text-xs font-black uppercase tracking-widest text-amber-800 underline decoration-amber-400 underline-offset-2"
+                        >
+                          View live vote counts
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
               {(portalFlags?.canUseElectionCommitteeControls || portalFlags?.canManageAdmins) && (
                 <div className="mb-8 space-y-4">
@@ -1116,7 +1281,16 @@ export function ElectionPortalApp() {
                               await refreshElectionServerData();
                               addLog("ADMIN", "POLLS CLOSED. RESULTS OFFICIAL.");
                             }}
-                            className="rounded-2xl bg-red-600 p-4 text-xs font-bold uppercase text-white shadow-xl transition-all active:scale-95"
+                            className={`rounded-2xl p-4 text-xs font-bold uppercase text-white shadow-xl transition-all active:scale-95 ${
+                              portalFlags?.votingProgress?.allMembersHaveVoted
+                                ? "bg-red-600 ring-2 ring-amber-400 ring-offset-2"
+                                : "bg-red-600"
+                            }`}
+                            title={
+                              portalFlags?.votingProgress?.allMembersHaveVoted
+                                ? "Full turnout: close polls and declare winners."
+                                : "Close voting and declare official winners."
+                            }
                           >
                             Close Polls
                           </button>
@@ -1169,7 +1343,7 @@ export function ElectionPortalApp() {
               )}
 
               {(electionStatus === "voting" || electionStatus === "ended") && (
-                <div className="mb-8 space-y-6">
+                <div id="election-live-tally" className="mb-8 scroll-mt-28 space-y-6">
                   <div className="flex items-center justify-between px-1">
                     <h3 className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-slate-400">
                       <Trophy size={12} /> {electionStatus === "ended" ? "Official Winners" : "Live Tally"}
@@ -1455,6 +1629,23 @@ export function ElectionPortalApp() {
               <CheckCircle size={40} />
             </div>
             <h2 className="mb-4 text-4xl font-black leading-none tracking-tighter text-slate-900">Ballot Recorded</h2>
+            {voteConfirmation && (
+              <div className="mx-auto mb-6 max-w-sm rounded-2xl border border-emerald-200 bg-emerald-50/80 px-5 py-4 text-left shadow-sm">
+                <p className="mb-2 text-[10px] font-black uppercase tracking-widest text-emerald-800">Confirmation</p>
+                <p className="text-sm font-bold text-slate-800">
+                  {voteConfirmation.votesRecorded} selections recorded
+                </p>
+                <p className="mt-1 text-xs text-slate-600">
+                  Server time:{" "}
+                  <span className="font-semibold text-slate-800">
+                    {new Date(voteConfirmation.recordedAt).toLocaleString(undefined, {
+                      dateStyle: "medium",
+                      timeStyle: "short",
+                    })}
+                  </span>
+                </p>
+              </div>
+            )}
             <p className="px-10 font-medium text-slate-500">
               Thank you for participating. Your votes have been added to the secure tally. Official results are live on the dashboard.
             </p>

@@ -103,6 +103,9 @@ export async function POST(request: Request) {
     }
   }
 
+  const votesRecorded = COMMITTEES.reduce((sum, committee) => sum + ballot[committee].length, 0);
+  const recordedAt = new Date().toISOString();
+
   try {
     await prisma.$transaction(async (tx) => {
       await tx.vote.createMany({
@@ -122,7 +125,7 @@ export async function POST(request: Request) {
         data: {
           user: voter.b2cId,
           action: "VOTE_CAST",
-          details: "Ballot cast via secure voting endpoint.",
+          details: `Ballot cast: ${votesRecorded} selections recorded at ${recordedAt}.`,
           userId: voter.id,
         },
       });
@@ -138,6 +141,16 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, message: "Failed to cast ballot." }, { status: 500 });
   }
 
-  return NextResponse.json({ ok: true, data: { status: "recorded" } }, { status: 201 });
+  return NextResponse.json(
+    {
+      ok: true,
+      data: {
+        status: "recorded" as const,
+        recordedAt,
+        votesRecorded,
+      },
+    },
+    { status: 201 },
+  );
 }
 

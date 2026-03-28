@@ -81,6 +81,25 @@ export async function POST(request: Request) {
       })
     : undefined;
 
+  let votingProgress:
+    | {
+        totalMembers: number;
+        ballotsCast: number;
+        allMembersHaveVoted: boolean;
+      }
+    | undefined;
+  if (canManageAdmins || canUseElectionCommitteeControls) {
+    const [totalMembers, ballotsCast] = await Promise.all([
+      prisma.user.count(),
+      prisma.user.count({ where: { hasVoted: true } }),
+    ]);
+    votingProgress = {
+      totalMembers,
+      ballotsCast,
+      allMembersHaveVoted: totalMembers > 0 && ballotsCast === totalMembers,
+    };
+  }
+
   return NextResponse.json({
     ok: true,
     data: {
@@ -90,6 +109,7 @@ export async function POST(request: Request) {
       displayRole: getDisplayRoleLabel(user),
       officerTitle,
       officerPositions,
+      votingProgress,
     },
   });
 }
