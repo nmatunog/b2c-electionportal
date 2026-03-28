@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { verifyAndUpgradePassword } from "@/lib/auth-password";
 import { userCanManageNominations } from "@/lib/authz";
 import { COMMITTEES } from "@/lib/election";
+import { nominationCandidateKey } from "@/lib/nomination-groups";
 import { prisma } from "@/lib/prisma";
 import { getClientIp, takeRateLimit } from "@/lib/rate-limit";
 
@@ -104,6 +105,30 @@ export async function POST(request: Request) {
   }
   if (!isCommitteePosition(position)) {
     return NextResponse.json({ ok: false, message: "Invalid committee position." }, { status: 400 });
+  }
+
+  const newKey = nominationCandidateKey({
+    position,
+    nomineeName,
+    nomineeB2cId,
+  });
+  const existingForPosition = await prisma.nomination.findMany({
+    where: { position },
+    select: { nomineeName: true, position: true, nomineeB2cId: true },
+  });
+  for (const row of existingForPosition) {
+    if (
+      nominationCandidateKey({
+        position: row.position,
+        nomineeName: row.nomineeName,
+        nomineeB2cId: row.nomineeB2cId,
+      }) === newKey
+    ) {
+      return NextResponse.json(
+        { ok: false, message: "This member is already nominated for this position." },
+        { status: 409 },
+      );
+    }
   }
 
   try {

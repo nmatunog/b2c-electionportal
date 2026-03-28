@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 
 import { COMMITTEES } from "@/lib/election";
-import { dedupeByCandidateIdentity } from "@/lib/nomination-groups";
+import { dedupeByCandidateIdentity, isRegistryMemberAlreadyNominatedForPosition } from "@/lib/nomination-groups";
 
 import { PremiumCard } from "./premium-card";
 import type { PortalNomination, RegistryMember } from "./types";
@@ -53,6 +53,7 @@ export function NominationModule({
   const [selectedTinNo, setSelectedTinNo] = useState("");
   const [selectedMember, setSelectedMember] = useState<RegistryMember | null>(null);
   const [nominationSuccess, setNominationSuccess] = useState<string | null>(null);
+  const [nominationWarning, setNominationWarning] = useState<string | null>(null);
 
   useEffect(() => {
     if (!nominationSuccess) return;
@@ -60,7 +61,27 @@ export function NominationModule({
     return () => window.clearTimeout(t);
   }, [nominationSuccess]);
 
+  useEffect(() => {
+    if (!nominationWarning) return;
+    const t = window.setTimeout(() => setNominationWarning(null), 6000);
+    return () => window.clearTimeout(t);
+  }, [nominationWarning]);
+
+  /** Ignores stale selection if nominations refresh and this member is already listed for this position. */
+  const selectedMemberForPosition =
+    selectedMember && targetPos && !isRegistryMemberAlreadyNominatedForPosition(selectedMember, targetPos, nominations)
+      ? selectedMember
+      : null;
+
   const currentNominees = dedupeByCandidateIdentity(nominations.filter((n) => n.position === targetPos));
+  const selectableMembers =
+    targetPos != null
+      ? masterRegistry.filter(
+          (m) =>
+            Boolean(m.b2cId) &&
+            !isRegistryMemberAlreadyNominatedForPosition(m, targetPos, nominations),
+        )
+      : [];
   const currentMotion = targetPos ? motions[targetPos] || { stage: "none", moverId: null } : { stage: "none", moverId: null };
   const isMover = currentMotion.moverId === activeMember.b2cId;
   const isLocked =
@@ -74,15 +95,23 @@ export function NominationModule({
             {nominationSuccess}
           </div>
         )}
-        <div className="flex items-center justify-between px-1">
-          <h2 className="text-3xl font-extrabold text-slate-900">Nominations</h2>
+        {nominationWarning && (
+          <div className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-center text-xs font-bold text-amber-950">
+            {nominationWarning}
+          </div>
+        )}
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500">Election</p>
+            <h2 className="text-2xl font-extrabold tracking-tight text-slate-900 sm:text-3xl">Nominations</h2>
+          </div>
           <button
             type="button"
             onClick={onFinish}
-            className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100 text-slate-400"
+            className="flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 shadow-sm transition-colors hover:bg-slate-50 hover:text-slate-700"
             aria-label="Close"
           >
-            <X />
+            <X className="h-5 w-5" />
           </button>
         </div>
         <div className="grid gap-4">
@@ -95,6 +124,8 @@ export function NominationModule({
               <PremiumCard
                 key={c}
                 onClick={() => {
+                  setSelectedTinNo("");
+                  setSelectedMember(null);
                   setTargetPos(c);
                   setView("detail");
                 }}
@@ -131,14 +162,19 @@ export function NominationModule({
           {nominationSuccess}
         </div>
       )}
+      {nominationWarning && (
+        <div className="rounded-2xl border border-amber-300 bg-amber-50 px-4 py-3 text-center text-xs font-bold text-amber-950">
+          {nominationWarning}
+        </div>
+      )}
       <button
         type="button"
         onClick={() => setView("committees")}
-        className="flex items-center gap-2 text-sm font-bold text-blue-600"
+        className="inline-flex min-h-11 items-center gap-2 rounded-xl px-1 text-sm font-bold text-blue-700 transition-colors hover:bg-blue-50"
       >
-        <ArrowLeft size={16} /> Back to List
+        <ArrowLeft size={16} aria-hidden /> Back to committees
       </button>
-      <h2 className="text-3xl font-extrabold text-slate-900">{targetPos}</h2>
+      <h2 className="text-xl font-extrabold leading-snug text-slate-900 sm:text-2xl">{targetPos}</h2>
 
       <div className="space-y-3">
         {currentNominees.map((n) => (
@@ -198,30 +234,38 @@ export function NominationModule({
         </PremiumCard>
       )}
 
-      {!isLocked && currentMotion.stage === "none" && !selectedMember && (
+      {!isLocked && currentMotion.stage === "none" && !selectedMemberForPosition && (
         <PremiumCard className="space-y-6">
           <div className="space-y-2">
             <p className="ml-1 text-[10px] font-black uppercase tracking-widest text-slate-400">Select from full registry</p>
             <div className="relative">
               <Users className="absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-slate-400" size={20} />
               <select
-                value={selectedTinNo}
+                value={selectedMemberForPosition ? selectedTinNo : ""}
                 onChange={(e) => {
                   const tin = e.target.value;
                   setSelectedTinNo(tin);
                   const picked = masterRegistry.find((m) => m.tinNo === tin);
                   if (picked) setSelectedMember(picked);
                 }}
-                className="w-full appearance-none rounded-2xl border-2 border-slate-100 bg-slate-50 py-4 pl-12 pr-10 text-sm font-bold text-slate-700 outline-none transition-all focus:border-blue-500 focus:bg-white"
+                className="min-h-[48px] w-full appearance-none rounded-2xl border border-slate-200 bg-white py-3.5 pl-12 pr-10 text-sm font-semibold text-slate-800 shadow-sm outline-none transition focus:border-blue-600 focus:ring-2 focus:ring-blue-500/15"
               >
                 <option value="">Choose a member...</option>
-                {masterRegistry.map((m) => (
+                {selectableMembers.map((m) => (
                   <option key={m.tinNo} value={m.tinNo}>
                     {m.lastName}, {m.firstName}
                   </option>
                 ))}
               </select>
             </div>
+            {targetPos && selectableMembers.length === 0 && masterRegistry.some((m) => m.b2cId) && (
+              <p className="text-center text-[11px] font-semibold text-amber-800">
+                Everyone in the registry is already nominated for this position.
+              </p>
+            )}
+            {targetPos && selectableMembers.length === 0 && !masterRegistry.some((m) => m.b2cId) && (
+              <p className="text-center text-[11px] text-slate-500">No members with B2C IDs are available to nominate.</p>
+            )}
           </div>
 
           {currentNominees.length > 0 && (
@@ -236,13 +280,13 @@ export function NominationModule({
         </PremiumCard>
       )}
 
-      {selectedMember && (
+      {selectedMemberForPosition && (
         <div className="slide-up space-y-6">
           <div className="rounded-[2.5rem] border-2 border-blue-100 bg-blue-50/50 p-8 text-center shadow-inner">
             <AlertCircle className="mx-auto mb-4 h-12 w-12 text-blue-600" />
             <p className="mb-1 text-[10px] font-bold uppercase tracking-widest text-slate-400">Confirm Candidate</p>
             <h3 className="text-2xl font-black text-blue-900">
-              {selectedMember.firstName} {selectedMember.lastName}
+              {selectedMemberForPosition.firstName} {selectedMemberForPosition.lastName}
             </h3>
             <p className="mt-3 inline-block rounded-full bg-blue-600 px-4 py-1.5 text-[9px] font-black uppercase tracking-widest text-white">
               {targetPos}
@@ -257,10 +301,18 @@ export function NominationModule({
               <button
                 type="button"
                 onClick={async () => {
-                  const ok = await onNominate(selectedMember, targetPos);
+                  if (
+                    isRegistryMemberAlreadyNominatedForPosition(selectedMemberForPosition, targetPos, nominations)
+                  ) {
+                    setNominationWarning(
+                      `${selectedMemberForPosition.firstName} ${selectedMemberForPosition.lastName} is already nominated for this position.`,
+                    );
+                    return;
+                  }
+                  const ok = await onNominate(selectedMemberForPosition, targetPos);
                   if (!ok) return;
                   setNominationSuccess(
-                    `Nomination recorded for ${selectedMember.firstName} ${selectedMember.lastName} — ${targetPos}.`,
+                    `Nomination recorded for ${selectedMemberForPosition.firstName} ${selectedMemberForPosition.lastName} — ${targetPos}.`,
                   );
                   setSelectedTinNo("");
                   setSelectedMember(null);
@@ -273,9 +325,17 @@ export function NominationModule({
               <button
                 type="button"
                 onClick={async () => {
-                  const ok = await onNominate(selectedMember, targetPos);
+                  if (
+                    isRegistryMemberAlreadyNominatedForPosition(selectedMemberForPosition, targetPos, nominations)
+                  ) {
+                    setNominationWarning(
+                      `${selectedMemberForPosition.firstName} ${selectedMemberForPosition.lastName} is already nominated for this position.`,
+                    );
+                    return;
+                  }
+                  const ok = await onNominate(selectedMemberForPosition, targetPos);
                   if (!ok) return;
-                  const msg = `Nomination recorded for ${selectedMember.firstName} ${selectedMember.lastName} — ${targetPos}.`;
+                  const msg = `Nomination recorded for ${selectedMemberForPosition.firstName} ${selectedMemberForPosition.lastName} — ${targetPos}.`;
                   setNominationSuccess(msg);
                   onNominationRecorded?.(msg);
                   setSelectedTinNo("");

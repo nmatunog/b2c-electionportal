@@ -24,21 +24,23 @@ export default async function MembersRegistryPage() {
 
   return (
     <>
-      <header className="fixed left-0 right-0 top-0 z-40 mx-auto flex h-16 max-w-xl items-center justify-between border-b border-slate-100 bg-white/80 px-4 backdrop-blur-md sm:px-6">
-        <Link href="/" className="flex items-center gap-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-700 text-xs font-bold text-white shadow-lg">
-            B
-          </div>
-          <span className="text-[10px] font-extrabold uppercase tracking-tighter text-blue-950">
-            B2C <span className="font-bold text-blue-600">Portal</span>
+      <header className="fixed left-0 right-0 top-0 z-40 border-b border-slate-200/80 bg-white/95 pt-[env(safe-area-inset-top)] shadow-sm backdrop-blur-md">
+        <div className="mx-auto flex h-14 max-w-xl items-center justify-between gap-2 px-4 sm:h-16 sm:max-w-2xl sm:px-6 lg:max-w-3xl">
+          <Link href="/" className="flex min-w-0 items-center gap-2.5 rounded-xl py-1">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#1e3a5f] text-[10px] font-bold text-white shadow-md">
+              B2C
+            </div>
+            <span className="truncate text-xs font-extrabold tracking-tight text-slate-900 sm:text-sm">
+              Election <span className="text-blue-700">Portal</span>
+            </span>
+          </Link>
+          <span className="shrink-0 whitespace-nowrap rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-[9px] font-bold uppercase tracking-wide text-slate-600 sm:px-3 sm:text-[10px]">
+            Registry
           </span>
-        </Link>
-        <span className="whitespace-nowrap rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1.5 text-[9px] font-black uppercase tracking-tight text-slate-600 sm:px-3 sm:text-[10px]">
-          Members Registry
-        </span>
+        </div>
       </header>
 
-      <main className="mx-auto max-w-xl px-6 pb-24 pt-24">
+      <main className="mx-auto w-full max-w-xl px-4 pb-24 pt-[calc(4rem+env(safe-area-inset-top))] sm:max-w-2xl sm:px-6 sm:pt-[calc(4.5rem+env(safe-area-inset-top))] lg:max-w-3xl">
         <div className="mb-8 flex flex-col gap-1">
           <h1 className="text-2xl font-black tracking-tight text-slate-900">Members Registry</h1>
           <p className="text-sm font-medium text-slate-500">

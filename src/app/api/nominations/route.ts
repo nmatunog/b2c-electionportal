@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { verifyAndUpgradePassword } from "@/lib/auth-password";
+import { nominationCandidateKey } from "@/lib/nomination-groups";
 import { prisma } from "@/lib/prisma";
 import { getClientIp, takeRateLimit } from "@/lib/rate-limit";
 
@@ -116,6 +117,30 @@ export async function POST(request: Request) {
   const validated = validateCreateInput(body);
   if (!validated.ok) {
     return NextResponse.json({ ok: false, message: validated.message }, { status: 400 });
+  }
+
+  const newKey = nominationCandidateKey({
+    position: validated.data.position,
+    nomineeName: validated.data.nomineeName,
+    nomineeB2cId: validated.data.nomineeB2cId,
+  });
+  const existingForPosition = await prisma.nomination.findMany({
+    where: { position: validated.data.position },
+    select: { nomineeName: true, position: true, nomineeB2cId: true },
+  });
+  for (const row of existingForPosition) {
+    if (
+      nominationCandidateKey({
+        position: row.position,
+        nomineeName: row.nomineeName,
+        nomineeB2cId: row.nomineeB2cId,
+      }) === newKey
+    ) {
+      return NextResponse.json(
+        { ok: false, message: "This member is already nominated for this position." },
+        { status: 409 },
+      );
+    }
   }
 
   try {

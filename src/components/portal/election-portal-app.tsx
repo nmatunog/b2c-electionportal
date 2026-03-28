@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
@@ -26,7 +26,8 @@ import { PremiumCard } from "./premium-card";
 import { SuperUserPanel } from "./super-user-panel";
 import type { PortalNomination, RegistryMember } from "./types";
 import { COMMITTEES, COMMITTEE_SEATS } from "@/lib/election";
-import { dedupeByCandidateIdentity } from "@/lib/nomination-groups";
+import { dedupeByCandidateIdentity, isRegistryMemberAlreadyNominatedForPosition } from "@/lib/nomination-groups";
+import { mergeSessionMemberIntoRegistry } from "@/lib/registry-for-voting";
 
 const ID_OFFSET = 5100;
 const ID_YEAR = "2026";
@@ -206,6 +207,16 @@ export function ElectionPortalApp() {
   const [nominationNotice, setNominationNotice] = useState<string | null>(null);
   const [voteConfirmation, setVoteConfirmation] = useState<VoteConfirmation | null>(null);
   const activeMemberRef = useRef<ActiveMember | null>(null);
+
+  /** Server roster plus any signed-in / locally registered members not yet in the fetched list (new signups, refresh races). */
+  const registryForVoting = useMemo(() => {
+    let merged = masterRegistry;
+    for (const profile of Object.values(localRegistry)) {
+      merged = mergeSessionMemberIntoRegistry(merged, profile);
+    }
+    merged = mergeSessionMemberIntoRegistry(merged, activeMember);
+    return merged;
+  }, [masterRegistry, localRegistry, activeMember]);
 
   useEffect(() => {
     activeMemberRef.current = activeMember;
@@ -602,6 +613,10 @@ export function ElectionPortalApp() {
       addLog("NOMINATION", "Selected member has no B2C ID and cannot be nominated yet.");
       return false;
     }
+    if (isRegistryMemberAlreadyNominatedForPosition(m, pos, nominations)) {
+      addLog("NOMINATION", "This member is already nominated for this position.");
+      return false;
+    }
     try {
       const res = await fetch("/api/nominations", {
         method: "POST",
@@ -614,6 +629,13 @@ export function ElectionPortalApp() {
         }),
       });
       const json = (await res.json()) as { ok?: boolean; data?: ApiNominationRow; message?: string };
+      if (res.status === 409) {
+        addLog(
+          "NOMINATION",
+          typeof json.message === "string" ? json.message : "This member is already nominated for this position.",
+        );
+        return false;
+      }
       if (!json.ok || !json.data) {
         addLog(
           "NOMINATION",
@@ -815,62 +837,71 @@ export function ElectionPortalApp() {
   };
 
   return (
-    <div className="selection:bg-blue-100 mx-auto max-w-xl pb-20 font-sans text-slate-900">
-      <header className="fixed left-0 right-0 top-0 z-40 mx-auto flex h-16 max-w-xl items-center justify-between border-b border-slate-100 bg-white/80 px-4 backdrop-blur-md sm:px-6">
-        <button
-          type="button"
-          className="flex items-center gap-2"
-          onClick={() => activeMember && setStep("dashboard")}
-        >
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-700 text-xs font-bold text-white shadow-lg">
-            B
-          </div>
-          <span className="text-[10px] font-extrabold uppercase tracking-tighter text-blue-950">
-            B2C <span className="font-bold text-blue-600">Portal</span>
-          </span>
-        </button>
-        <div className="flex items-center gap-2 sm:gap-3">
-          {activeMember && portalFlags?.canViewRegistry && !portalFlags?.canManageAdmins && (
-            <button
-              type="button"
-              onClick={() => void openMembersRegistry()}
-              className="whitespace-nowrap rounded-full border border-blue-100 bg-blue-50 px-2.5 py-1.5 text-[9px] font-black uppercase tracking-tight text-blue-700 transition-colors hover:bg-blue-100 sm:px-3 sm:text-[10px]"
-            >
-              View Members Registry
-            </button>
-          )}
-          {activeMember && (
-            <>
-              <Bell className="h-5 w-5 text-slate-300" />
-              <div className="h-8 w-8 overflow-hidden rounded-full border-2 border-white bg-slate-200">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(activeMember.lastName)}`}
-                  alt=""
-                  width={32}
-                  height={32}
-                />
-              </div>
+    <div className="selection:bg-blue-100 portal-shell pb-[max(5rem,env(safe-area-inset-bottom))] font-sans text-slate-900">
+      <header className="fixed left-0 right-0 top-0 z-40 border-b border-slate-200/80 bg-white/90 pt-[env(safe-area-inset-top)] shadow-sm backdrop-blur-md supports-[backdrop-filter]:bg-white/80">
+        <div className="portal-shell flex min-h-[3.5rem] items-center justify-between gap-2 py-2 sm:min-h-16 sm:py-0">
+          <button
+            type="button"
+            className="flex min-w-0 items-center gap-2.5 rounded-xl py-1 text-left transition-colors hover:bg-slate-50/80"
+            onClick={() => activeMember && setStep("dashboard")}
+          >
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#1e3a5f] text-xs font-bold text-white shadow-md ring-1 ring-slate-900/10">
+              B2C
+            </div>
+            <div className="min-w-0 leading-tight">
+              <span className="block truncate text-[9px] font-extrabold uppercase tracking-[0.12em] text-slate-500 sm:text-[10px]">
+                Cooperative
+              </span>
+              <span className="block truncate text-xs font-extrabold tracking-tight text-slate-900 sm:text-sm">
+                Election <span className="text-blue-700">Portal</span>
+              </span>
+            </div>
+          </button>
+          <div className="flex shrink-0 items-center gap-1.5 sm:gap-3">
+            {activeMember && portalFlags?.canViewRegistry && !portalFlags?.canManageAdmins && (
               <button
                 type="button"
-                onClick={() => {
-                  void fetch("/api/auth/registry-session", { method: "DELETE" });
-                  setPortalFlags(null);
-                  setStep("auth");
-                  setActiveMember(null);
-                  setIsReturning(false);
-                }}
-                className="text-slate-400"
-                aria-label="Log out"
+                onClick={() => void openMembersRegistry()}
+                className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-2 text-[9px] font-bold uppercase tracking-wide text-slate-700 shadow-sm transition-colors hover:bg-slate-50 sm:px-3 sm:text-[10px]"
+                aria-label="View members registry"
               >
-                <LogOut size={18} />
+                <Users className="h-4 w-4 sm:hidden" aria-hidden />
+                <span className="hidden sm:inline">Registry</span>
               </button>
-            </>
-          )}
+            )}
+            {activeMember && (
+              <>
+                <Bell className="hidden h-5 w-5 text-slate-300 sm:block" aria-hidden />
+                <div className="h-8 w-8 shrink-0 overflow-hidden rounded-full border-2 border-white bg-slate-100 shadow-sm ring-1 ring-slate-200/80">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(activeMember.lastName)}`}
+                    alt=""
+                    width={32}
+                    height={32}
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void fetch("/api/auth/registry-session", { method: "DELETE" });
+                    setPortalFlags(null);
+                    setStep("auth");
+                    setActiveMember(null);
+                    setIsReturning(false);
+                  }}
+                  className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+                  aria-label="Log out"
+                >
+                  <LogOut size={18} />
+                </button>
+              </>
+            )}
+          </div>
         </div>
       </header>
 
-      <main className="px-6 pt-24">
+      <main className="pt-[calc(3.75rem+env(safe-area-inset-top))] sm:pt-[calc(5rem+env(safe-area-inset-top))]">
         {registryLoading && step === "auth" && (
           <p className="py-8 text-center text-sm text-slate-500">Loading official registry…</p>
         )}
@@ -881,10 +912,13 @@ export function ElectionPortalApp() {
         )}
 
         {step === "auth" && !registryLoading && (
-          <div className="slide-up space-y-8">
-            <div className="py-6 text-center">
-              <h1 className="text-4xl font-black leading-none tracking-tighter text-slate-900">Member Access</h1>
-              <p className="mt-2 font-medium text-slate-500">Verified Identity Portal</p>
+          <div className="slide-up space-y-8 sm:space-y-10">
+            <div className="space-y-2 py-4 text-center sm:py-6">
+              <p className="portal-eyebrow text-slate-500">Secure access</p>
+              <h1 className="portal-section-title">Member sign-in</h1>
+              <p className="mx-auto max-w-md text-sm font-medium leading-relaxed text-slate-600">
+                Use your registered name as it appears on official records.
+              </p>
             </div>
             <PremiumCard>
               <form
@@ -896,20 +930,22 @@ export function ElectionPortalApp() {
                   const pw = (form.elements.namedItem("pw") as HTMLInputElement | undefined)?.value;
                   handleAuth(ln, fn, pw);
                 }}
-                className="space-y-4"
+                className="space-y-3 sm:space-y-4"
               >
                 <input
                   name="ln"
                   type="text"
-                  placeholder="Last Name"
-                  className="w-full rounded-2xl border-2 border-transparent bg-slate-50 px-6 py-4 font-bold uppercase outline-none transition-all focus:border-blue-500"
+                  placeholder="Last name"
+                  autoComplete="family-name"
+                  className="portal-input portal-input-muted uppercase"
                   required
                 />
                 <input
                   name="fn"
                   type="text"
-                  placeholder="First Name"
-                  className="w-full rounded-2xl border-2 border-transparent bg-slate-50 px-6 py-4 font-bold uppercase outline-none transition-all focus:border-blue-500"
+                  placeholder="First name"
+                  autoComplete="given-name"
+                  className="portal-input portal-input-muted uppercase"
                   required
                 />
                 {isReturning && (
@@ -918,25 +954,30 @@ export function ElectionPortalApp() {
                       name="pw"
                       type="password"
                       placeholder="Password"
-                      className="w-full rounded-2xl border-2 border-blue-200 bg-white px-6 py-4 font-bold outline-none transition-all focus:border-blue-600"
+                      autoComplete="current-password"
+                      className="portal-input border-blue-200 bg-white focus:border-blue-600"
                       required
                       autoFocus
                     />
                     <button
                       type="button"
                       onClick={() => setStep("forgot_password")}
-                      className="ml-1 text-[10px] font-bold uppercase tracking-widest text-blue-600"
+                      className="ml-1 text-left text-[10px] font-bold uppercase tracking-widest text-blue-700 underline-offset-2 hover:underline"
                     >
-                      Forgot Password?
+                      Forgot password?
                     </button>
                   </div>
                 )}
-                {authError && <p className="text-center text-xs font-bold text-red-500">{authError}</p>}
+                {authError && (
+                  <p className="rounded-xl border border-red-100 bg-red-50 px-3 py-2 text-center text-xs font-semibold text-red-700">
+                    {authError}
+                  </p>
+                )}
                 <button
                   type="submit"
-                  className="w-full rounded-3xl bg-blue-700 py-5 text-lg font-black text-white shadow-2xl shadow-blue-100 transition-all active:scale-95"
+                  className="w-full rounded-2xl bg-[#1e3a5f] py-4 text-base font-bold text-white shadow-lg shadow-slate-900/10 transition-all hover:bg-[#152a45] active:scale-[0.99] sm:rounded-3xl sm:py-5 sm:text-lg"
                 >
-                  {isReturning ? "Secure Login" : "Verify Identity"}
+                  {isReturning ? "Sign in securely" : "Continue"}
                 </button>
               </form>
             </PremiumCard>
@@ -945,28 +986,49 @@ export function ElectionPortalApp() {
 
         {step === "forgot_password" && (
           <div className="slide-up space-y-8">
-            <div className="py-6 text-center">
-              <h1 className="text-3xl font-black leading-tight text-slate-900">Reset Portal</h1>
+            <div className="space-y-2 py-4 text-center sm:py-6">
+              <p className="portal-eyebrow text-slate-500">Account recovery</p>
+              <h1 className="portal-section-title">Verify your identity</h1>
+              <p className="text-sm text-slate-600">Match your details to the official registry.</p>
             </div>
             <PremiumCard>
-              <form onSubmit={handleReset} className="space-y-4">
-                <input name="ln" type="text" placeholder="Last Name" className="w-full rounded-2xl bg-slate-50 px-6 py-4 font-bold uppercase outline-none" required />
-                <input name="fn" type="text" placeholder="First Name" className="w-full rounded-2xl bg-slate-50 px-6 py-4 font-bold uppercase outline-none" required />
+              <form onSubmit={handleReset} className="space-y-3 sm:space-y-4">
+                <input
+                  name="ln"
+                  type="text"
+                  placeholder="Last name"
+                  className="portal-input portal-input-muted uppercase"
+                  required
+                />
+                <input
+                  name="fn"
+                  type="text"
+                  placeholder="First name"
+                  className="portal-input portal-input-muted uppercase"
+                  required
+                />
                 <div className="space-y-1">
                   <label className="ml-1 flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-slate-400">
                     <Lock size={10} /> TIN Number
                   </label>
-                  <input name="tin" type="text" placeholder="e.g. 123456789" className="w-full rounded-2xl bg-slate-50 px-6 py-4 font-bold outline-none transition-all focus:border-blue-500" required />
+                  <input name="tin" type="text" placeholder="e.g. 123456789" className="portal-input portal-input-muted" required />
                 </div>
                 <div className="space-y-1">
                   <label className="ml-1 flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-slate-400">
                     <Calendar size={10} /> Date of Birth
                   </label>
-                  <input name="dob" type="date" className="w-full rounded-2xl bg-slate-50 px-6 py-4 font-bold outline-none transition-all focus:border-blue-500" required />
+                  <input name="dob" type="date" className="portal-input portal-input-muted" required />
                 </div>
-                {authError && <p className="text-center text-xs font-bold text-red-500">{authError}</p>}
-                <button type="submit" className="w-full rounded-3xl bg-blue-700 py-5 text-lg font-black text-white shadow-xl">
-                  Verify & Proceed
+                {authError && (
+                  <p className="rounded-xl border border-red-100 bg-red-50 px-3 py-2 text-center text-xs font-semibold text-red-700">
+                    {authError}
+                  </p>
+                )}
+                <button
+                  type="submit"
+                  className="w-full rounded-2xl bg-[#1e3a5f] py-4 text-base font-bold text-white shadow-lg transition hover:bg-[#152a45] sm:rounded-3xl sm:py-5"
+                >
+                  Verify & continue
                 </button>
                 <button type="button" onClick={() => setStep("auth")} className="w-full pt-2 text-xs font-bold uppercase text-slate-400">
                   Cancel
@@ -978,73 +1040,66 @@ export function ElectionPortalApp() {
 
         {step === "self_register" && (
           <div className="slide-up space-y-8">
-            <div className="py-6 text-center">
-              <h1 className="text-3xl font-black leading-tight text-slate-900">Complete Identity Registration</h1>
-              <p className="mt-2 text-sm text-slate-500">You can proceed with minimum identity details.</p>
+            <div className="space-y-2 py-4 text-center sm:py-6">
+              <p className="portal-eyebrow text-slate-500">New registration</p>
+              <h1 className="portal-section-title">Create your record</h1>
+              <p className="mx-auto max-w-md text-sm text-slate-600">
+                Provide minimum identity details. At least one contact method is required.
+              </p>
             </div>
             <PremiumCard>
-              <form onSubmit={handleSelfRegister} className="space-y-4">
+              <form onSubmit={handleSelfRegister} className="space-y-3 sm:space-y-4">
                 <input
                   name="ln"
                   type="text"
-                  placeholder="Last Name"
+                  placeholder="Last name"
                   defaultValue={activeMember?.lastName ?? ""}
-                  className="w-full rounded-2xl bg-slate-50 px-6 py-4 font-bold uppercase outline-none"
+                  className="portal-input portal-input-muted uppercase"
                   required
                 />
                 <input
                   name="fn"
                   type="text"
-                  placeholder="First Name"
+                  placeholder="First name"
                   defaultValue={activeMember?.firstName ?? ""}
-                  className="w-full rounded-2xl bg-slate-50 px-6 py-4 font-bold uppercase outline-none"
+                  className="portal-input portal-input-muted uppercase"
                   required
                 />
                 <div className="space-y-1">
                   <label className="ml-1 flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-slate-400">
                     <Lock size={10} /> TIN Number
                   </label>
-                  <input
-                    name="tin"
-                    type="text"
-                    placeholder="e.g. 123456789"
-                    className="w-full rounded-2xl bg-slate-50 px-6 py-4 font-bold outline-none transition-all focus:border-blue-500"
-                    required
-                  />
+                  <input name="tin" type="text" placeholder="e.g. 123456789" className="portal-input portal-input-muted" required />
                 </div>
                 <div className="space-y-1">
                   <label className="ml-1 flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-slate-400">
                     <Calendar size={10} /> Date of Birth
                   </label>
-                  <input
-                    name="dob"
-                    type="date"
-                    className="w-full rounded-2xl bg-slate-50 px-6 py-4 font-bold outline-none transition-all focus:border-blue-500"
-                    required
-                  />
+                  <input name="dob" type="date" className="portal-input portal-input-muted" required />
                 </div>
                 <input
                   name="mobile"
-                  type="text"
-                  placeholder="Mobile Number (required if no email)"
-                  className="w-full rounded-2xl bg-slate-50 px-6 py-4 font-bold outline-none"
+                  type="tel"
+                  placeholder="Mobile (required if no email)"
+                  className="portal-input portal-input-muted"
                 />
                 <input
                   name="email"
                   type="email"
                   placeholder="Email (required if no mobile)"
-                  className="w-full rounded-2xl bg-slate-50 px-6 py-4 font-bold outline-none"
+                  className="portal-input portal-input-muted"
                 />
-                <input
-                  name="pw"
-                  type="password"
-                  placeholder="Password"
-                  className="w-full rounded-2xl bg-slate-50 px-6 py-4 font-bold outline-none"
-                  required
-                />
-                {authError && <p className="text-center text-xs font-bold text-red-500">{authError}</p>}
-                <button type="submit" className="w-full rounded-3xl bg-blue-700 py-5 text-lg font-black text-white shadow-xl">
-                  Register & Continue
+                <input name="pw" type="password" placeholder="Password" className="portal-input" required />
+                {authError && (
+                  <p className="rounded-xl border border-red-100 bg-red-50 px-3 py-2 text-center text-xs font-semibold text-red-700">
+                    {authError}
+                  </p>
+                )}
+                <button
+                  type="submit"
+                  className="w-full rounded-2xl bg-[#1e3a5f] py-4 text-base font-bold text-white shadow-lg transition hover:bg-[#152a45] sm:rounded-3xl sm:py-5 sm:text-lg"
+                >
+                  Register & continue
                 </button>
                 <button type="button" onClick={() => setStep("auth")} className="w-full pt-2 text-xs font-bold uppercase text-slate-400">
                   Back to Login
@@ -1095,23 +1150,30 @@ export function ElectionPortalApp() {
         {step === "dashboard" && activeMember && (
           <div className="slide-up space-y-8 pb-10">
             <div>
-              <div className="mb-6 flex items-start justify-between">
-                <div>
-                  <h1 className="text-3xl font-black leading-tight text-slate-900">Hello, {activeMember.firstName}! 👋</h1>
-                  <p className="font-medium text-slate-500">
-                    Member ID: <span className="font-bold text-blue-600">{activeMember.b2cId}</span>
-                  </p>
-                  <p className="mt-1 text-xs font-semibold uppercase tracking-wide text-emerald-700">
-                    Member in Good Standing
+              <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0 space-y-2">
+                  <p className="portal-eyebrow text-slate-500">Dashboard</p>
+                  <h1 className="text-2xl font-extrabold tracking-tight text-slate-900 sm:text-3xl">
+                    Welcome, {activeMember.firstName}
+                  </h1>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="inline-flex items-center rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide text-slate-600 shadow-sm">
+                      {portalFlags?.displayRole ?? "Member"}
+                    </span>
+                    <span className="text-xs font-semibold text-emerald-800">In good standing</span>
+                  </div>
+                  <p className="font-mono text-sm font-semibold text-slate-700">
+                    <span className="text-xs font-sans font-medium text-slate-500">B2C ID </span>
+                    <span className="text-blue-700">{activeMember.b2cId}</span>
                   </p>
                   {portalFlags?.officerTitle && (
-                    <p className="mt-1 text-xs font-medium text-slate-400">{portalFlags.officerTitle}</p>
+                    <p className="text-xs font-medium text-slate-500">{portalFlags.officerTitle}</p>
                   )}
                 </div>
                 <button
                   type="button"
                   onClick={() => setStep("profile")}
-                  className="flex h-12 w-12 items-center justify-center rounded-2xl border border-slate-100 bg-white text-blue-600 shadow-lg transition-all active:scale-95"
+                  className="flex h-12 w-12 shrink-0 items-center justify-center self-end rounded-2xl border border-slate-200 bg-white text-blue-700 shadow-md transition-all hover:bg-slate-50 active:scale-95 sm:self-start"
                   aria-label="Edit profile"
                 >
                   <Edit3 size={20} />
@@ -1124,14 +1186,15 @@ export function ElectionPortalApp() {
                 </div>
               )}
 
-              <PremiumCard dark className="relative mb-8 overflow-hidden bg-blue-700">
-                <div className="relative z-10">
-                  <span className="mb-4 inline-block rounded-full bg-white/20 px-3 py-1 text-[10px] font-bold uppercase tracking-wider">
-                    Official Election Cycle
+              <PremiumCard dark className="relative mb-8 overflow-hidden border-0 bg-gradient-to-br from-[#1e3a5f] to-[#0f2744] text-white ring-white/10">
+                <div className="relative z-10 max-w-lg">
+                  <span className="mb-3 inline-block rounded-full bg-white/15 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.15em] text-blue-100">
+                    2026 General Assembly
                   </span>
-                  <h2 className="mb-1 text-2xl font-black">2026 General Assembly</h2>
-                  <p className="mb-6 text-xs font-medium leading-relaxed text-blue-100">
-                    Phase: <span className="font-black uppercase text-white underline">{electionStatus}</span>
+                  <h2 className="mb-2 text-xl font-bold tracking-tight sm:text-2xl">Election cycle</h2>
+                  <p className="mb-6 text-sm font-medium leading-relaxed text-blue-100/90">
+                    Current phase:{" "}
+                    <span className="font-bold uppercase tracking-wide text-white">{electionStatus}</span>
                   </p>
                   <button
                     type="button"
@@ -1142,16 +1205,16 @@ export function ElectionPortalApp() {
                       }
                       setStep(electionStatus === "voting" ? "vote" : "nominate");
                     }}
-                    className="rounded-2xl bg-white px-6 py-3 text-sm font-black text-blue-700 shadow-lg transition-all active:scale-95"
+                    className="rounded-2xl bg-white px-6 py-3.5 text-sm font-bold text-[#1e3a5f] shadow-lg transition-all hover:bg-blue-50 active:scale-[0.99]"
                   >
                     {electionStatus === "voting"
                       ? activeMember.hasVoted
                         ? "View ballot confirmation"
-                        : "Cast Ballot"
-                      : "Manage Nominations"}
+                        : "Cast ballot"
+                      : "Manage nominations"}
                   </button>
                 </div>
-                <Gavel className="absolute -bottom-10 -right-10 h-48 w-48 rotate-12 text-white/10" />
+                <Gavel className="pointer-events-none absolute -bottom-10 -right-10 h-48 w-48 rotate-12 text-white/10" aria-hidden />
               </PremiumCard>
 
               {activeMember && (
@@ -1256,7 +1319,7 @@ export function ElectionPortalApp() {
                     const canStartVoting =
                       allNominationsReadyToClose || Boolean(portalFlags?.canManageAdmins);
                     return (
-                      <div className="grid grid-cols-2 gap-4">
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4">
                         {electionStatus === "nomination" &&
                           (portalFlags?.canUseElectionCommitteeControls || portalFlags?.canManageAdmins) && (
                           <button
@@ -1269,9 +1332,9 @@ export function ElectionPortalApp() {
                               if (ok) addLog("ADMIN", "NOMINATIONS CLOSED. VOTING PHASE OPENED.");
                             }}
                             disabled={!canStartVoting}
-                            className={`rounded-2xl p-4 text-xs font-bold uppercase shadow-xl transition-all ${
+                            className={`min-h-[3rem] rounded-2xl px-4 py-3 text-left text-xs font-bold uppercase leading-snug shadow-md transition-all sm:min-h-0 sm:p-4 ${
                               canStartVoting
-                                ? "bg-slate-900 text-white active:scale-95"
+                                ? "bg-slate-900 text-white active:scale-[0.99]"
                                 : "cursor-not-allowed bg-slate-300 text-slate-500"
                             }`}
                             title={
@@ -1316,7 +1379,7 @@ export function ElectionPortalApp() {
                               await refreshElectionServerData();
                               addLog("ADMIN", "POLLS CLOSED. RESULTS OFFICIAL.");
                             }}
-                            className={`rounded-2xl p-4 text-xs font-bold uppercase text-white shadow-xl transition-all active:scale-95 ${
+                            className={`min-h-[3rem] rounded-2xl px-4 py-3 text-left text-xs font-bold uppercase leading-snug text-white shadow-md transition-all active:scale-[0.99] sm:min-h-0 sm:p-4 ${
                               portalFlags?.votingProgress?.allMembersHaveVoted
                                 ? "bg-red-600 ring-2 ring-amber-400 ring-offset-2"
                                 : "bg-red-600"
@@ -1505,10 +1568,17 @@ export function ElectionPortalApp() {
 
         {step === "profile" && activeMember && (
           <div className="slide-up space-y-8 pb-10">
-            <button type="button" className="mb-2 flex cursor-pointer items-center gap-2" onClick={() => setStep("dashboard")}>
-              <ArrowLeft size={16} /> <span className="text-sm font-bold uppercase tracking-widest text-blue-600">Back</span>
+            <button
+              type="button"
+              className="mb-2 inline-flex min-h-11 items-center gap-2 rounded-xl px-1 text-sm font-bold text-blue-700 hover:bg-blue-50"
+              onClick={() => setStep("dashboard")}
+            >
+              <ArrowLeft size={16} aria-hidden /> Back
             </button>
-            <h1 className="mb-8 px-1 text-4xl font-black leading-none tracking-tighter text-slate-900">Update Profile</h1>
+            <div className="mb-6 space-y-1">
+              <p className="portal-eyebrow text-slate-500">Your profile</p>
+              <h1 className="portal-section-title">Contact & identity</h1>
+            </div>
             <PremiumCard className="space-y-6">
               <div className="space-y-4">
                 <div className="space-y-1">
@@ -1520,7 +1590,7 @@ export function ElectionPortalApp() {
                     placeholder="0917-XXX-XXXX"
                     value={profileMobile}
                     onChange={(e) => setProfileMobile(e.target.value)}
-                    className="w-full rounded-2xl border-2 border-slate-100 bg-slate-50 p-4 font-bold uppercase outline-none focus:border-blue-600"
+                    className="portal-input uppercase"
                   />
                 </div>
                 <div className="space-y-1">
@@ -1532,7 +1602,7 @@ export function ElectionPortalApp() {
                     placeholder="name@coop.com"
                     value={profileEmail}
                     onChange={(e) => setProfileEmail(e.target.value)}
-                    className="w-full rounded-2xl border-2 border-slate-100 bg-slate-50 p-4 font-bold uppercase outline-none focus:border-blue-600"
+                    className="portal-input"
                   />
                 </div>
                 <div className="space-y-1">
@@ -1543,7 +1613,7 @@ export function ElectionPortalApp() {
                     type="date"
                     value={profileDob}
                     onChange={(e) => setProfileDob(e.target.value)}
-                    className="w-full rounded-2xl border-2 border-slate-100 bg-slate-50 p-4 font-bold uppercase outline-none focus:border-blue-600"
+                    className="portal-input"
                   />
                 </div>
               </div>
@@ -1565,9 +1635,9 @@ export function ElectionPortalApp() {
                 type="button"
                 onClick={() => void handleProfileSave()}
                 disabled={profileSaving}
-                className="w-full rounded-3xl bg-blue-700 py-5 text-lg font-black text-white shadow-xl transition-all active:scale-95"
+                className="w-full rounded-2xl bg-[#1e3a5f] py-4 text-base font-bold text-white shadow-lg transition hover:bg-[#152a45] disabled:opacity-60 sm:rounded-3xl sm:py-5 sm:text-lg"
               >
-                {profileSaving ? "Saving..." : "Save Changes"}
+                {profileSaving ? "Saving..." : "Save changes"}
               </button>
             </PremiumCard>
           </div>
@@ -1590,17 +1660,26 @@ export function ElectionPortalApp() {
               addLog("OBJECTION", `Member objected to closing ${pos}.`);
             }}
             onFinish={() => setStep("dashboard")}
-            masterRegistry={masterRegistry}
+            masterRegistry={registryForVoting}
             onNominationRecorded={(msg) => setNominationNotice(msg)}
           />
         )}
 
         {step === "vote" && (
-          <div className="slide-up space-y-10 pb-32">
-            <div className="flex items-center justify-between px-1">
-              <h2 className="text-4xl font-black tracking-tighter text-slate-900">Cast Ballot</h2>
-              <button type="button" onClick={() => setStep("dashboard")} className="flex h-10 w-10 items-center justify-center rounded-full bg-slate-100" aria-label="Close">
-                <X />
+          <div className="slide-up space-y-8 pb-36 sm:space-y-10 sm:pb-40">
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <p className="portal-eyebrow text-slate-500">Voting</p>
+                <h2 className="text-2xl font-extrabold tracking-tight text-slate-900 sm:text-3xl md:text-4xl">Cast your ballot</h2>
+                <p className="mt-1 max-w-md text-sm text-slate-600">Select the required number of candidates per committee.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setStep("dashboard")}
+                className="flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-600 shadow-sm transition-colors hover:bg-slate-50"
+                aria-label="Close"
+              >
+                <X className="h-5 w-5" />
               </button>
             </div>
             {COMMITTEES.map((committee) => {
@@ -1676,29 +1755,33 @@ export function ElectionPortalApp() {
                 </div>
               );
             })}
-            <div className="fixed bottom-0 left-0 right-0 z-50 mx-auto max-w-xl bg-gradient-to-t from-slate-50 via-slate-50 to-transparent p-6">
-              <button
-                type="button"
-                onClick={handleVoteSubmit}
-                disabled={!COMMITTEES.every((c) => ballot[c].length === COMMITTEE_SEATS[c])}
-                className={`w-full rounded-[2.5rem] py-5 text-lg font-black shadow-2xl transition-all ${
-                  COMMITTEES.every((c) => ballot[c].length === COMMITTEE_SEATS[c])
-                    ? "bg-blue-950 text-white opacity-100 active:scale-95"
-                    : "cursor-not-allowed bg-slate-300 text-slate-500 opacity-50"
-                }`}
-              >
-                Confirm Selections ({Object.values(COMMITTEE_SEATS).reduce((sum, seats) => sum + seats, 0)} Votes)
-              </button>
+            <div className="fixed bottom-0 left-0 right-0 z-50 border-t border-slate-200/80 bg-white/95 backdrop-blur-md sm:px-6">
+              <div className="portal-shell mx-auto max-w-xl pb-[max(1rem,env(safe-area-inset-bottom))] pt-4 sm:max-w-2xl lg:max-w-3xl">
+                <button
+                  type="button"
+                  onClick={handleVoteSubmit}
+                  disabled={!COMMITTEES.every((c) => ballot[c].length === COMMITTEE_SEATS[c])}
+                  className={`w-full rounded-2xl py-4 text-base font-bold shadow-lg transition-all sm:rounded-3xl sm:py-5 sm:text-lg ${
+                    COMMITTEES.every((c) => ballot[c].length === COMMITTEE_SEATS[c])
+                      ? "bg-[#0f2744] text-white active:scale-[0.99]"
+                      : "cursor-not-allowed bg-slate-300 text-slate-500"
+                  }`}
+                >
+                  Confirm ballot (
+                  {Object.values(COMMITTEE_SEATS).reduce((sum, seats) => sum + seats, 0)} selections)
+                </button>
+              </div>
             </div>
           </div>
         )}
 
         {step === "success" && (
           <div className="slide-up py-20 text-center">
-            <div className="mx-auto mb-8 flex h-24 w-24 animate-bounce items-center justify-center rounded-[2.5rem] bg-emerald-500 text-white shadow-2xl shadow-emerald-100">
+            <div className="mx-auto mb-8 flex h-24 w-24 items-center justify-center rounded-full bg-emerald-600 text-white shadow-xl shadow-emerald-900/10 motion-safe:animate-bounce">
               <CheckCircle size={40} />
             </div>
-            <h2 className="mb-4 text-4xl font-black leading-none tracking-tighter text-slate-900">Ballot Recorded</h2>
+            <p className="portal-eyebrow mb-2 text-emerald-800">Confirmation</p>
+            <h2 className="mb-4 text-3xl font-extrabold tracking-tight text-slate-900 sm:text-4xl">Ballot recorded</h2>
             {voteConfirmation && (
               <div className="mx-auto mb-6 max-w-sm rounded-2xl border border-emerald-200 bg-emerald-50/80 px-5 py-4 text-left shadow-sm">
                 <p className="mb-2 text-[10px] font-black uppercase tracking-widest text-emerald-800">Confirmation</p>

@@ -36,6 +36,30 @@ export function nominationCandidateKey(row: {
   return `${pos}\0name:${nameKey}`;
 }
 
+/** True if this member already has a nomination row for this committee (same normalized name + position). */
+export function isRegistryMemberAlreadyNominatedForPosition(
+  member: { firstName: string; lastName: string; b2cId?: string },
+  position: string,
+  nominations: { position: string; name: string; nomineeB2cId?: string | null }[],
+): boolean {
+  const nomineeName = `${member.firstName} ${member.lastName}`.trim();
+  const key = nominationCandidateKey({
+    position,
+    nomineeName,
+    nomineeB2cId: member.b2cId ?? null,
+  });
+  return nominations.some((n) => {
+    if (n.position !== position) return false;
+    return (
+      nominationCandidateKey({
+        position: n.position,
+        nomineeName: n.name,
+        nomineeB2cId: n.nomineeB2cId ?? null,
+      }) === key
+    );
+  });
+}
+
 export function groupNominationsByCandidate<T extends NominationLike>(rows: T[]): { key: string; rows: T[] }[] {
   const map = new Map<string, T[]>();
   for (const row of rows) {

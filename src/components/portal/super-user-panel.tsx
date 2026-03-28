@@ -46,9 +46,9 @@ export function SuperUserPanel({ actorB2cId, password, positions }: SuperUserPan
   };
 
   return (
-    <div className="mb-8 space-y-4 rounded-3xl border border-amber-200 bg-amber-50/50 p-5">
-      <h3 className="text-xs font-bold uppercase tracking-widest text-amber-900">Officer assignments</h3>
-      <p className="text-[10px] font-medium leading-relaxed text-amber-800/90">
+    <div className="mb-8 space-y-4 rounded-2xl border border-amber-200/80 bg-amber-50/60 p-5 shadow-sm sm:rounded-3xl sm:p-6">
+      <h3 className="text-xs font-bold uppercase tracking-widest text-amber-950">Officer assignments</h3>
+      <p className="text-xs font-medium leading-relaxed text-amber-900/90 sm:text-[11px]">
         Assign members to cooperative positions (portal admin access follows each position&apos;s rules). Use the member&apos;s B2C ID.
       </p>
       <div className="space-y-2">
@@ -57,12 +57,12 @@ export function SuperUserPanel({ actorB2cId, password, positions }: SuperUserPan
           placeholder="Member B2C ID"
           value={memberB2cId}
           onChange={(e) => setMemberB2cId(e.target.value)}
-          className="w-full rounded-2xl border border-amber-200 bg-white px-4 py-3 text-sm font-bold"
+          className="w-full rounded-xl border border-amber-200 bg-white px-4 py-3.5 text-sm font-semibold shadow-sm outline-none transition focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20 sm:rounded-2xl"
         />
         <select
           value={slug}
           onChange={(e) => setSlug(e.target.value)}
-          className="w-full rounded-2xl border border-amber-200 bg-white px-4 py-3 text-sm font-bold"
+          className="w-full rounded-xl border border-amber-200 bg-white px-4 py-3.5 text-sm font-semibold shadow-sm outline-none transition focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20 sm:rounded-2xl"
         >
           {positions.map((p) => (
             <option key={p.id} value={p.slug}>
@@ -71,18 +71,18 @@ export function SuperUserPanel({ actorB2cId, password, positions }: SuperUserPan
           ))}
         </select>
       </div>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-3">
         <button
           type="button"
           onClick={() => void run("assign")}
-          className="rounded-2xl bg-amber-900 py-3 text-xs font-black uppercase text-white"
+          className="min-h-11 rounded-xl bg-amber-950 py-3 text-xs font-bold uppercase tracking-wide text-white shadow-sm transition hover:bg-amber-900 sm:rounded-2xl"
         >
           Assign
         </button>
         <button
           type="button"
           onClick={() => void run("unassign")}
-          className="rounded-2xl border border-amber-800 bg-white py-3 text-xs font-black uppercase text-amber-900"
+          className="min-h-11 rounded-xl border border-amber-300 bg-white py-3 text-xs font-bold uppercase tracking-wide text-amber-950 shadow-sm transition hover:bg-amber-50 sm:rounded-2xl"
         >
           Unassign
         </button>

@@ -301,7 +301,7 @@ export function NominationsAdminPanel({
   const duplicateGroups = groupedNominations.filter((g) => g.rows.length > 1).length;
 
   return (
-    <div className="space-y-4 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+    <div className="portal-card-elevated space-y-4 p-5 sm:p-6">
       {votingProgress && (
         <div className="rounded-2xl border border-blue-200 bg-blue-50/90 p-4 shadow-sm">
           <div className="mb-2 flex items-center gap-2">

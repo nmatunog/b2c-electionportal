@@ -21,7 +21,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={`${plusJakarta.variable} h-full`}>
-      <body className="flex min-h-full flex-col bg-slate-50 font-sans antialiased">{children}</body>
+      <body className="portal-app-bg flex min-h-dvh min-h-[100dvh] flex-col font-sans antialiased">
+        {children}
+      </body>
     </html>
   );
 }

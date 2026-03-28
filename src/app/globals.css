@@ -1,8 +1,13 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f8fafc;
+  --foreground: #0f172a;
+  --portal-brand: #1e3a5f;
+  --portal-accent: #1d4ed8;
+  --portal-muted: #64748b;
+  --portal-border: rgb(226 232 240 / 0.9);
+  --portal-header-h: 3.5rem;
 }
 
 @theme inline {
@@ -11,10 +16,11 @@
   --font-sans: var(--font-plus-jakarta);
 }
 
+/* Keep a consistent, official light presentation on all devices (readable in sunlight, print-friendly). */
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --background: #f8fafc;
+    --foreground: #0f172a;
   }
 }
 
@@ -22,21 +28,54 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: var(--font-plus-jakarta), system-ui, sans-serif;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Subtle official backdrop on large screens */
+@layer utilities {
+  .portal-app-bg {
+    background-color: #f8fafc;
+    background-image: radial-gradient(ellipse 120% 80% at 50% -20%, rgb(219 234 254 / 0.5), transparent),
+      radial-gradient(ellipse 60% 40% at 100% 0%, rgb(241 245 249 / 0.8), transparent);
+  }
+}
+
+@layer components {
+  .portal-shell {
+    @apply mx-auto w-full max-w-xl sm:max-w-2xl lg:max-w-3xl px-4 sm:px-6 lg:px-8;
+  }
+
+  .portal-input {
+    @apply w-full rounded-xl border border-slate-200/90 bg-white px-4 py-3.5 text-sm font-semibold tracking-tight text-slate-900 shadow-sm outline-none transition-[border-color,box-shadow] placeholder:text-slate-400 focus:border-blue-600 focus:ring-2 focus:ring-blue-500/15 sm:rounded-2xl sm:px-5 sm:py-4;
+  }
+
+  .portal-input-muted {
+    @apply border-transparent bg-slate-50/90 focus:bg-white;
+  }
+
+  .portal-section-title {
+    @apply text-2xl font-extrabold tracking-tight text-slate-900 sm:text-3xl md:text-4xl;
+  }
+
+  .portal-eyebrow {
+    @apply text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500 sm:text-[11px];
+  }
+
+  .portal-card-elevated {
+    @apply rounded-2xl border border-slate-200/80 bg-white shadow-[0_1px_0_rgb(0_0_0_/0.04),0_12px_32px_-8px_rgb(15_23_42_/0.08)] sm:rounded-3xl;
+  }
 }
 
 @keyframes slideUp {
   from {
     opacity: 0;
-    transform: translateY(20px);
+    transform: translateY(12px);
   }
   to {
     opacity: 1;
     transform: translateY(0);
   }
-}
-
-.slide-up {
-  animation: slideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 @keyframes fadeIn {
@@ -48,6 +87,17 @@ body {
   }
 }
 
+.slide-up {
+  animation: slideUp 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .slide-up,
+  .fade-in {
+    animation: none !important;
+  }
+}
+
 .fade-in {
-  animation: fadeIn 0.4s ease-out;
+  animation: fadeIn 0.35s ease-out both;
 }
