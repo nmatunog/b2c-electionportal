@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 
 import { COMMITTEES } from "@/lib/election";
+import { dedupeByCandidateIdentity } from "@/lib/nomination-groups";
 
 import { PremiumCard } from "./premium-card";
 import type { PortalNomination, RegistryMember } from "./types";
@@ -59,7 +60,7 @@ export function NominationModule({
     return () => window.clearTimeout(t);
   }, [nominationSuccess]);
 
-  const currentNominees = nominations.filter((n) => n.position === targetPos);
+  const currentNominees = dedupeByCandidateIdentity(nominations.filter((n) => n.position === targetPos));
   const currentMotion = targetPos ? motions[targetPos] || { stage: "none", moverId: null } : { stage: "none", moverId: null };
   const isMover = currentMotion.moverId === activeMember.b2cId;
   const isLocked =
@@ -87,7 +88,7 @@ export function NominationModule({
         <div className="grid gap-4">
           {COMMITTEES.map((c) => {
             const locked = lockedPositions.includes(c) || electionStatus !== "nomination";
-            const count = nominations.filter((n) => n.position === c).length;
+            const count = dedupeByCandidateIdentity(nominations.filter((n) => n.position === c)).length;
             const motionActive = (motions[c]?.stage ?? "none") !== "none";
 
             return (

@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { verifyAndUpgradePassword } from "@/lib/auth-password";
 import { userHasElectionCommitteeAccess } from "@/lib/authz";
 import { COMMITTEE_SEATS, COMMITTEES } from "@/lib/election";
+import { mergeNominationVotesForCommittee } from "@/lib/nomination-groups";
 import { prisma } from "@/lib/prisma";
 import { getClientIp, takeRateLimit } from "@/lib/rate-limit";
 
@@ -67,7 +68,7 @@ export async function POST(request: Request) {
 
   const nominations = await prisma.nomination.findMany({
     where: { status: "accepted" },
-    select: { id: true, nomineeName: true, position: true },
+    select: { id: true, nomineeName: true, position: true, nomineeB2cId: true },
   });
   const voteGroups = await prisma.vote.groupBy({
     by: ["committee", "nominationId"],
@@ -78,14 +79,21 @@ export async function POST(request: Request) {
 
   const winners = Object.fromEntries(
     COMMITTEES.map((committee) => {
-      const sorted = nominations
+      const forCommittee = nominations
         .filter((n) => n.position === committee)
         .map((n) => ({
-          nominationId: n.id,
+          id: n.id,
+          position: n.position,
           nomineeName: n.nomineeName,
-          votes: tally.get(n.id) ?? 0,
-        }))
-        .sort((a, b) => b.votes - a.votes);
+          nomineeB2cId: n.nomineeB2cId,
+        }));
+      const merged = mergeNominationVotesForCommittee(forCommittee, (id) => tally.get(id) ?? 0);
+      const sorted = merged.map((m) => ({
+        nominationId: m.nominationId,
+        nomineeName: m.nomineeName,
+        votes: m.votes,
+        mergedNominationIds: m.mergedNominationIds,
+      }));
       return [committee, sorted.slice(0, COMMITTEE_SEATS[committee])];
     }),
   );

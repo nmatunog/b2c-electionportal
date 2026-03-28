@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 
 import { COMMITTEE_SEATS, COMMITTEES } from "@/lib/election";
+import { mergeNominationVotesForCommittee } from "@/lib/nomination-groups";
 import { prisma } from "@/lib/prisma";
 
 export async function GET() {
   const nominations = await prisma.nomination.findMany({
     where: { status: "accepted" },
-    select: { id: true, nomineeName: true, position: true },
+    select: { id: true, nomineeName: true, position: true, nomineeB2cId: true },
   });
 
   const voteGroups = await prisma.vote.groupBy({
@@ -21,14 +22,21 @@ export async function GET() {
 
   const byCommittee = Object.fromEntries(
     COMMITTEES.map((committee) => {
-      const entries = nominations
+      const forCommittee = nominations
         .filter((n) => n.position === committee)
         .map((n) => ({
-          nominationId: n.id,
+          id: n.id,
+          position: n.position,
           nomineeName: n.nomineeName,
-          votes: tally.get(n.id) ?? 0,
-        }))
-        .sort((a, b) => b.votes - a.votes);
+          nomineeB2cId: n.nomineeB2cId,
+        }));
+      const merged = mergeNominationVotesForCommittee(forCommittee, (id) => tally.get(id) ?? 0);
+      const entries = merged.map((m) => ({
+        nominationId: m.nominationId,
+        nomineeName: m.nomineeName,
+        votes: m.votes,
+        mergedNominationIds: m.mergedNominationIds,
+      }));
 
       return [
         committee,
@@ -47,11 +55,20 @@ export async function GET() {
     select: { timestamp: true },
   });
 
+  const [registeredMembers, membersWhoVoted] = await Promise.all([
+    prisma.user.count(),
+    prisma.user.count({ where: { hasVoted: true } }),
+  ]);
+
   return NextResponse.json({
     ok: true,
     data: {
       byCommittee,
       declaredAt: declared?.timestamp ?? null,
+      voterStats: {
+        registeredMembers,
+        membersWhoVoted,
+      },
     },
   });
 }

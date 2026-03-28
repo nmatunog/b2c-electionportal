@@ -26,6 +26,7 @@ import { PremiumCard } from "./premium-card";
 import { SuperUserPanel } from "./super-user-panel";
 import type { PortalNomination, RegistryMember } from "./types";
 import { COMMITTEES, COMMITTEE_SEATS } from "@/lib/election";
+import { dedupeByCandidateIdentity } from "@/lib/nomination-groups";
 
 const ID_OFFSET = 5100;
 const ID_YEAR = "2026";
@@ -145,12 +146,26 @@ type ElectionResultsApi = Record<
     string,
     {
       seats: number;
-      candidates: { nominationId: string; nomineeName: string; votes: number }[];
-      winners: { nominationId: string; nomineeName: string; votes: number }[];
+      candidates: {
+        nominationId: string;
+        nomineeName: string;
+        votes: number;
+        mergedNominationIds?: string[];
+      }[];
+      winners: {
+        nominationId: string;
+        nomineeName: string;
+        votes: number;
+        mergedNominationIds?: string[];
+      }[];
     }
   >
 > & {
   declaredAt: string | null;
+  voterStats?: {
+    registeredMembers: number;
+    membersWhoVoted: number;
+  };
 };
 
 export function ElectionPortalApp() {
@@ -179,6 +194,10 @@ export function ElectionPortalApp() {
   const [portalFlags, setPortalFlags] = useState<PortalFlags | null>(null);
   const [showAdminTools, setShowAdminTools] = useState(false);
   const [resultsDeclaredAt, setResultsDeclaredAt] = useState<string | null>(null);
+  const [resultsVoterStats, setResultsVoterStats] = useState<{
+    registeredMembers: number;
+    membersWhoVoted: number;
+  } | null>(null);
   const [profileDob, setProfileDob] = useState("");
   const [profileMobile, setProfileMobile] = useState("");
   const [profileEmail, setProfileEmail] = useState("");
@@ -259,10 +278,26 @@ export function ElectionPortalApp() {
     const tallies: Record<string, number> = {};
     for (const committee of COMMITTEES) {
       const rows = byCommittee[committee]?.candidates ?? [];
-      for (const row of rows) tallies[row.nominationId] = row.votes;
+      for (const row of rows) {
+        tallies[row.nominationId] = row.votes;
+        const merged = row.mergedNominationIds;
+        if (merged?.length) {
+          for (const id of merged) tallies[id] = row.votes;
+        }
+      }
     }
     setVoteTallies(tallies);
     setResultsDeclaredAt(results.declaredAt ?? null);
+    const vs = results.voterStats;
+    if (
+      vs &&
+      typeof vs.registeredMembers === "number" &&
+      typeof vs.membersWhoVoted === "number"
+    ) {
+      setResultsVoterStats({ registeredMembers: vs.registeredMembers, membersWhoVoted: vs.membersWhoVoted });
+    } else {
+      setResultsVoterStats(null);
+    }
   }, []);
 
   useEffect(() => {
@@ -1350,19 +1385,51 @@ export function ElectionPortalApp() {
                       <Trophy size={12} /> {electionStatus === "ended" ? "Official Winners" : "Live Tally"}
                     </h3>
                   </div>
-                  {electionStatus === "ended" && resultsDeclaredAt && (
-                    <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-[11px] font-semibold text-emerald-800">
-                      Results declared at{" "}
-                      <span className="font-black">
-                        {new Date(resultsDeclaredAt).toLocaleString(undefined, {
-                          dateStyle: "medium",
-                          timeStyle: "short",
-                        })}
-                      </span>
+                  {electionStatus === "ended" && (resultsDeclaredAt || resultsVoterStats) && (
+                    <div className="space-y-3">
+                      {resultsDeclaredAt && (
+                        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-[11px] font-semibold text-emerald-800">
+                          Results declared at{" "}
+                          <span className="font-black">
+                            {new Date(resultsDeclaredAt).toLocaleString(undefined, {
+                              dateStyle: "medium",
+                              timeStyle: "short",
+                            })}
+                          </span>
+                        </div>
+                      )}
+                      {resultsVoterStats && (
+                        <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+                          <p className="mb-1 text-[10px] font-black uppercase tracking-widest text-slate-500">
+                            Voter participation
+                          </p>
+                          <p className="text-sm font-semibold text-slate-800">
+                            <span className="tabular-nums font-black text-emerald-700">
+                              {resultsVoterStats.membersWhoVoted}
+                            </span>{" "}
+                            of{" "}
+                            <span className="tabular-nums font-black text-slate-900">
+                              {resultsVoterStats.registeredMembers}
+                            </span>{" "}
+                            registered members cast a ballot
+                            {resultsVoterStats.registeredMembers > 0 && (
+                              <span className="ml-2 text-xs font-medium text-slate-500">
+                                (
+                                {Math.round(
+                                  (100 * resultsVoterStats.membersWhoVoted) /
+                                    resultsVoterStats.registeredMembers,
+                                )}
+                                % turnout)
+                              </span>
+                            )}
+                          </p>
+                        </div>
+                      )}
                     </div>
                   )}
                   {COMMITTEES.map((com) => {
-                    const candidates = nominations.filter((n) => n.position === com && n.status === "accepted");
+                    const raw = nominations.filter((n) => n.position === com && n.status === "accepted");
+                    const candidates = dedupeByCandidateIdentity(raw);
                     const sorted = [...candidates].sort((a, b) => (voteTallies[b.id] || 0) - (voteTallies[a.id] || 0));
                     const winnerCount = COMMITTEE_SEATS[com];
                     return (
@@ -1537,7 +1604,9 @@ export function ElectionPortalApp() {
               </button>
             </div>
             {COMMITTEES.map((committee) => {
-              const candidates = nominations.filter((n) => n.position === committee && n.status === "accepted");
+              const candidates = dedupeByCandidateIdentity(
+                nominations.filter((n) => n.position === committee && n.status === "accepted"),
+              );
               const requiredSelections = COMMITTEE_SEATS[committee];
               return (
                 <div key={committee} className="space-y-4">
